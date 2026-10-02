@@ -1,0 +1,4 @@
+AP desk notes
+- "Acme" on its own always means Acme Supplies Inc. (office supplies & services), NOT Acme Logistics GmbH.
+- Globex invoices are in EUR and use European number formats (1.234,56 = one thousand two hundred thirty-four point fifty-six).
+- Always record the vendor's invoice number exactly as printed.

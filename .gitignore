@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.env
+data/
+runs/
+workspace/
+evals/.eval_playbook.json
+.pytest_cache/

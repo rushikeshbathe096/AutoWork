@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoWork</title>
+<style>
+:root{--bg:#0b1020;--panel:#121a2e;--line:#22304f;--text:#e6ebf5;--muted:#8b98b5;--accent:#6ea8fe;--ok:#3ecf8e;--bad:#ff6b6b;--warn:#f5b945;--human:#c792ea}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line)}
+header h1{font-size:17px;margin:0} header span{color:var(--muted)}
+.grid{display:grid;grid-template-columns:330px 1fr 440px;gap:14px;padding:14px;height:calc(100vh - 52px)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:4px 0 10px}
+textarea,select,input[type=text]{width:100%;background:#0d1426;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:8px;font:inherit}
+textarea{min-height:110px;resize:vertical}
+button{background:var(--accent);color:#08101f;border:0;border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:default}
+.preset{display:block;width:100%;text-align:left;margin:6px 0;font-weight:400;font-size:13px}
+.row{display:flex;gap:8px;align-items:center;margin:8px 0} .row label{color:var(--muted)}
+.ev{border-left:3px solid var(--line);padding:6px 10px;margin:6px 0;background:#0e1629;border-radius:0 6px 6px 0;white-space:pre-wrap;word-break:break-word}
+.ev .k{font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em}
+.ev.thought{border-color:#5c6b8f} .ev.action{border-color:var(--accent)} .ev.obs-ok{border-color:#2b3d63;color:#aab6d3;font-size:12px}
+.ev.obs-bad{border-color:var(--bad);font-size:12px} .ev.warning,.ev.error,.ev.llm_retry{border-color:var(--warn)}
+.ev.human_request,.ev.human_response,.ev.policy{border-color:var(--human)} .ev.verify{border-color:var(--ok)}
+.ev.plan{border-color:#4fd1c5} .ev.final{border-color:var(--ok)}
+.ev details summary{cursor:pointer;color:var(--muted)}
+.shot{width:100%;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:zoom-in}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px} .kv b{color:var(--muted);font-weight:500}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600}
+.verified{background:#12392b;color:var(--ok)} .failed,.error,.budget_exhausted{background:#3d1717;color:var(--bad)}
+.unverified,.needs_user{background:#3b2f12;color:var(--warn)} .running{background:#172a4d;color:var(--accent)}
+#ask{display:none;border:2px solid var(--human);background:#1d1630;border-radius:10px;padding:12px;margin-bottom:12px}
+#ask h3{margin:0 0 6px;color:var(--human);font-size:14px}
+.runs a{color:var(--text);text-decoration:none;display:block;padding:4px 0;font-size:12px;border-bottom:1px solid var(--line)}
+.muted{color:var(--muted)} ul{padding-left:18px;margin:4px 0}
+@media (max-width:1100px){.grid{grid-template-columns:1fr;height:auto}}
+</style>
+</head>
+<body>
+<header><h1>AutoWork</h1><span>autonomous task worker: real browser, real apps, verified outcomes</span><span id="status" style="margin-left:auto"></span></header>
+<div class="grid">
+  <div class="panel">
+    <h2>Task</h2>
+    <textarea id="task" placeholder="Describe what you need done…">Find the latest invoice from Acme, extract the amount and due date, enter it into our ERP, and tell me once it is done.</textarea>
+    <div class="row"><label>Mode</label><select id="mode"><option value="balanced">balanced: approve irreversible actions</option><option value="supervised">supervised: approve every data change</option><option value="autonomous">autonomous: no approvals</option></select></div>
+    <div class="row"><input type="checkbox" id="reset" checked><label for="reset">Reset simulated world first</label></div>
+    <div class="row"><input type="checkbox" id="pb" checked><label for="pb">Use learned playbook</label></div>
+    <h2 style="margin-top:12px">Inject faults</h2>
+    <div class="row"><input type="checkbox" id="f1"><label for="f1">Vendor portal login fails once (503)</label></div>
+    <div class="row"><input type="checkbox" id="f2"><label for="f2">ERP save times out (504) but saves</label></div>
+    <div class="row"><input type="checkbox" id="f3"><label for="f3">ERP session expires after 3 views</label></div>
+    <div class="row"><button id="go">Run task</button><button class="ghost" id="clearpb" title="Forget learned notes">Clear playbook</button></div>
+    <h2 style="margin-top:14px">Example tasks</h2>
+    <div id="presets"></div>
+    <h2 style="margin-top:14px">Past runs</h2>
+    <div class="runs" id="runs"></div>
+  </div>
+  <div class="panel" id="timelinePanel">
+    <div id="ask"></div>
+    <h2>Execution timeline</h2>
+    <div id="timeline" class="muted">Start a task to see the agent work.</div>
+  </div>
+  <div class="panel">
+    <h2>Live browser</h2>
+    <img id="shot" class="shot" alt="latest screenshot" style="display:none">
+    <div id="shotcap" class="muted" style="font-size:12px;margin:4px 0 12px"></div>
+    <h2>Plan</h2><div id="plan" class="muted">-</div>
+    <h2 style="margin-top:12px">Working memory</h2><div id="memory" class="kv muted">-</div>
+    <h2 style="margin-top:12px">Result</h2><div id="result" class="muted">-</div>
+    <h2 style="margin-top:12px">Learned playbook</h2><div id="playbook" class="muted" style="font-size:12px">-</div>
+  </div>
+</div>
+<script>
+const PRESETS = [
+  "Find the latest invoice from Acme, extract the amount and due date, enter it into our ERP, and tell me once it is done.",
+  "Enter the Globex invoice from my email into the ERP.",
+  "Enter the Initech invoice into the ERP.",
+  "Our CFO emailed about a vendor contact change. Make sure the ERP reflects it.",
+  "Enter all bills from q3_expenses.csv in the workspace into the ERP, skipping any that already exist.",
+  "Pay the latest Acme invoice in the ERP.",
+  "Which open ERP bill is due soonest? Write a short summary of all open bills to open_bills.md in the workspace.",
+];
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+PRESETS.forEach(p => { const b = document.createElement('button'); b.className='ghost preset'; b.textContent=p; b.onclick=()=>$('task').value=p; $('presets').appendChild(b); });
+let es, runId;
+
+function add(cls, kind, html){ const d=document.createElement('div'); d.className='ev '+cls; d.innerHTML=`<div class="k">${kind}</div>${html}`; const t=$('timeline'); if(t.classList.contains('muted')){t.innerHTML='';t.classList.remove('muted')} t.appendChild(d); $('timelinePanel').scrollTop=1e9; }
+function shot(p, cap){ if(!p) return; $('shot').src='/files/'+p; $('shot').style.display='block'; $('shotcap').textContent=cap||''; }
+$('shot').onclick=()=>window.open($('shot').src);
+
+function handle(e){
+  const d=e.data;
+  switch(e.type){
+    case 'start': $('status').innerHTML=`<span class="badge running">running</span> ${esc(d.model)} · ${esc(d.mode)}`; add('plan','start',esc(d.task)); break;
+    case 'plan':
+      $('plan').innerHTML=`<b>${esc(d.goal)}</b><ol>${(d.plan||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="muted">Success criteria:</div><ul>${(d.success_criteria||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ul>`;
+      add('plan','plan',`${esc(d.goal)}${(d.assumptions||[]).length?`\n<span class="muted">Assumptions: ${esc(d.assumptions.join('; '))}</span>`:''}`); break;
+    case 'thought': add('thought',`step ${d.step} · reasoning`,esc(d.text)); break;
+    case 'action': add('action',`step ${d.step} · action`,`<b>${esc(d.tool)}</b> ${esc(d.args)}`); break;
+    case 'observation': {
+      const first=d.text.split('\n').slice(0,3).join('\n');
+      add(d.ok?'obs-ok':'obs-bad', d.ok?'observation':'observation · failed', `<details><summary>${esc(first)}</summary>${esc(d.text)}</details>`);
+      shot(d.screenshot, `step ${d.step} · ${d.tool}`); break; }
+    case 'memory': $('memory').classList.remove('muted'); $('memory').innerHTML=Object.entries(d).map(([k,v])=>`<b>${esc(k)}</b><span>${esc(v)}</span>`).join(''); break;
+    case 'policy': add('policy','policy gate',esc(d.verdict+': '+d.reason)); break;
+    case 'human_request': add('human_request','asking human · '+d.kind,esc(d.question)); if(d.screenshot) shot(d.screenshot,'page awaiting approval'); break;
+    case 'waiting_for_human': showAsk(d); break;
+    case 'human_response': $('ask').style.display='none'; add('human_response','human answered',esc(d.answer ?? ((d.approved?'APPROVED':'DENIED')+(d.comment?': '+d.comment:'')))); break;
+    case 'warning': case 'error': case 'llm_retry': add(e.type,e.type,esc(d.message||'')+(d.reason?'\n'+esc(d.reason):'')); break;
+    case 'verify_start': add('verify','independent verification','Auditor (fresh context, read-only browser) is checking the real system state…'); break;
+    case 'verify_step': add('verify','auditor · '+esc(d.tool),`<details><summary>${esc(d.args)}</summary>${esc(d.text)}</details>`); shot(d.screenshot,'auditor view'); break;
+    case 'verify_result': add('verify', d.passed?'verification PASSED':'verification FAILED', esc(d.reason)+'\n'+esc((d.evidence||[]).join('\n'))); break;
+    case 'learned': add('plan','learned for next time',esc((d.notes||[]).join('\n'))); loadPlaybook(); break;
+    case 'final': {
+      $('status').innerHTML=`<span class="badge ${d.status}">${d.status}</span> ${d.steps} steps · ${d.duration_s}s · ${d.llm.calls} LLM calls`;
+      $('result').classList.remove('muted');
+      $('result').innerHTML=`<span class="badge ${d.status}">${d.status}</span><p>${esc(d.summary)}</p><ul>${d.evidence.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>${d.verification?`<div class="muted">Audit: ${esc(d.verification.reason)}</div>`:''}`;
+      add('final','final · '+d.status,esc(d.summary)); $('go').disabled=false; loadRuns(); break; }
+  }
+}
+function showAsk(d){
+  const a=$('ask'); a.style.display='block';
+  if(d.kind==='approval'){
+    a.innerHTML=`<h3>Approval required</h3><div style="white-space:pre-wrap">${esc(d.question)}</div><input type="text" id="cmt" placeholder="optional comment" style="margin:8px 0"><div class="row"><button id="yes">Approve</button><button class="ghost" id="no">Deny</button></div>`;
+    $('yes').onclick=()=>respond({qid:d.qid,approved:true,comment:$('cmt').value});
+    $('no').onclick=()=>respond({qid:d.qid,approved:false,comment:$('cmt').value});
+  } else {
+    a.innerHTML=`<h3>The agent needs your input</h3><div style="white-space:pre-wrap">${esc(d.question)}</div><div class="row" id="opts"></div><input type="text" id="ans" placeholder="your answer"><div class="row"><button id="send">Send</button></div>`;
+    (d.options||[]).forEach(o=>{const b=document.createElement('button');b.className='ghost';b.textContent=o;b.onclick=()=>respond({qid:d.qid,answer:o});$('opts').appendChild(b)});
+    $('send').onclick=()=>respond({qid:d.qid,answer:$('ans').value});
+  }
+  a.scrollIntoView();
+}
+async function respond(body){ await fetch(`/api/runs/${runId}/answer`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
+function watch(id){
+  runId=id; if(es) es.close();
+  ['timeline','plan','memory','result'].forEach(x=>{$(x).innerHTML='-';$(x).classList.add('muted')}); $('shot').style.display='none';
+  es=new EventSource(`/api/runs/${id}/events`); es.onmessage=m=>handle(JSON.parse(m.data)); es.onerror=()=>es.close();
+}
+$('go').onclick=async()=>{
+  const faults={}; if($('f1').checked) faults.acme_login_flaky=true; if($('f2').checked) faults.erp_submit_timeout=true; if($('f3').checked) faults.erp_session_expiry=3;
+  $('go').disabled=true;
+  const r=await fetch('/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task:$('task').value,mode:$('mode').value,use_playbook:$('pb').checked,reset_world:$('reset').checked,faults})});
+  const j=await r.json(); if(!r.ok){alert(j.detail);$('go').disabled=false;return} watch(j.run_id);
+};
+$('clearpb').onclick=async()=>{await fetch('/api/playbook',{method:'DELETE'});loadPlaybook()};
+async function loadRuns(){ const r=await (await fetch('/api/runs')).json(); $('runs').innerHTML=r.map(x=>`<a href="#" data-id="${x.run_id}"><span class="badge ${x.status}">${x.status}</span> ${esc(x.task.slice(0,60))}</a>`).join('')||'<span class="muted">none</span>'; $('runs').querySelectorAll('a').forEach(a=>a.onclick=ev=>{ev.preventDefault();watch(a.dataset.id)}); }
+async function loadPlaybook(){ const p=await (await fetch('/api/playbook')).json(); $('playbook').innerHTML=p.length?'<ul>'+p.map(n=>`<li>${esc(n.note)}</li>`).join('')+'</ul>':'(empty: notes appear after a verified run)'; }
+loadRuns(); loadPlaybook();
+</script>
+</body>
+</html>
