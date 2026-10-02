@@ -1,5 +1,17 @@
 # Implementation log: what has been built so far
 
+> **Historical log: describes the initial prototype (commit `79cc4f9`).** Since then a pre-submission audit changed several things this file still describes the old way:
+> - Credentials moved from `workspace_seed/credentials.md` into a vault with a `login` tool and redaction.
+> - Every browser request is now network-guarded (allowlist, redirects, high-risk gate), and approvals are bound to the exact action and page state.
+> - The control plane and `/admin` require tokens.
+> - `core.py` was split into `context.py`, `stuck.py` and `verifier.py`.
+> - Settings are validated, and ruff, mypy and CI were added.
+> - Three adversarial evals were added, with a categorized report.
+> - The test suite grew from 6 to 89 tests.
+>
+> The current design is in [README.md](README.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [SECURITY.md](SECURITY.md) and [docs/decisions/](docs/decisions/). What has still **not** been done: no run against a live LLM, so no measured eval results.
+
+
 This is a detailed account of everything implemented in this repository up to now: what exists, how each piece works, what has been tested, and what is still unverified. For setup instructions and the design rationale written for reviewers, see `README.md`.
 
 ---
