@@ -2,15 +2,20 @@
 Both bind to 127.0.0.1 only."""
 
 import logging
+import sys
 import threading
 
 import uvicorn
 
-from agent.config import WORKSPACE, reset_workspace
+from agent.config import WORKSPACE, Settings, SettingsError, reset_workspace
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    try:
+        Settings.from_env()  # fail fast on typos in .env (a missing API key is reported when a run starts)
+    except SettingsError as e:
+        sys.exit(f"autowork: {e}")
     if not WORKSPACE.exists():
         reset_workspace()
     import simworld.app as world_app  # imported first: it publishes SIMWORLD_ADMIN_TOKEN for this process

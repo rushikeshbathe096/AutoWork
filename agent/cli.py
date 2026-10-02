@@ -7,10 +7,10 @@ import json
 import logging
 import sys
 
-from .config import MODES, PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, Settings, reset_workspace
+from .config import MODES, PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, Settings, SettingsError, reset_workspace
 from .core import Agent
 from .human import CLIHuman
-from .llm import LLMClient
+from .llm import LLMClient, LLMError
 from .memory import Playbook
 from .vault import Vault
 
@@ -54,7 +54,12 @@ def printer(kind: str, data: dict):
 
 
 def main(argv: list[str] | None = None) -> None:
-    settings = Settings.from_env()
+    try:
+        settings = Settings.from_env()
+        llm = LLMClient(settings)
+    except (SettingsError, LLMError) as e:  # configuration problems: a clear message, not a traceback
+        print(f"autowork: {e}", file=sys.stderr)
+        sys.exit(2)
     ap = argparse.ArgumentParser(description="AutoWork autonomous task worker")
     ap.add_argument("task")
     ap.add_argument("--mode", default=settings.mode, choices=MODES)
@@ -67,7 +72,7 @@ def main(argv: list[str] | None = None) -> None:
     if a.reset_workspace or not WORKSPACE.exists():
         reset_workspace()
     agent = Agent(
-        LLMClient(settings),
+        llm,
         CLIHuman(),
         WORKSPACE,
         RUNS_DIR,
