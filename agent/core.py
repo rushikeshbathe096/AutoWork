@@ -12,6 +12,7 @@ Key reliability mechanisms, all in code rather than in the prompt:
 from __future__ import annotations
 
 import json
+import logging
 import time
 import traceback
 import uuid
@@ -20,10 +21,15 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from . import policy, prompts
-from .browser import BrowserSession
+from .browser import ApprovalRequired, BrowserSession
 from .llm import LLMClient, LLMError, parse_json
 from .memory import Playbook, WorkingMemory
 from .tools import VERIFIER_TOOLS, WORKER_TOOLS, ToolBox, ToolResult, tool_args_preview
+from .vault import Redactor, Vault
+
+log = logging.getLogger("autowork.agent")
+
+SCHEMA_VERSION = 1  # bump when the shape of events.jsonl / report.json changes
 
 
 class Human(Protocol):
@@ -44,6 +50,7 @@ class Report:
     duration_s: float = 0.0
     llm: dict = field(default_factory=dict)
     screenshots: list[str] = field(default_factory=list)
+    schema_version: int = SCHEMA_VERSION
 
 
 @dataclass
@@ -60,9 +67,17 @@ class Turn:
 class Agent:
     def __init__(self, llm: LLMClient, human: Human, workspace: Path, runs_dir: Path, playbook: Playbook | None,
                  emit: Callable[[str, dict], None] = lambda t, d: None, mode: str = "balanced", max_steps: int = 40,
-                 headless: bool = True, keep_full_observations: int = 2, max_verify_rounds: int = 2):
+                 headless: bool = True, keep_full_observations: int = 2, max_verify_rounds: int = 2,
+                 vault: Vault | None = None, max_tokens_total: int = 400_000, max_active_seconds: float = 1800):
         self.llm, self.human, self.workspace, self.playbook = llm, human, workspace, playbook
-        self.emit, self.mode, self.max_steps, self.headless = emit, mode, max_steps, headless
+        self.mode, self.max_steps, self.headless = mode, max_steps, headless
+        self._sink = emit
+        self.vault = vault
+        self.redactor = Redactor(vault.secret_values() if vault else [])
+        self.max_tokens_total, self.max_active_seconds = max_tokens_total, max_active_seconds
+        self._t0 = time.monotonic()
+        self._human_wait_s = 0.0
+        self._seq = 0
         self.keep_full = keep_full_observations
         self.max_verify_rounds = max_verify_rounds
         self.run_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
@@ -72,13 +87,39 @@ class Agent:
         self.step = 0
         llm.on_retry = lambda m: self.emit("llm_retry", {"message": m})
 
+    def emit(self, kind: str, data: dict) -> None:
+        """Single exit point for the structured trace: redact secrets, persist to events.jsonl, forward.
+        WHY one place: every log line and UI message passes here, so redaction cannot be forgotten."""
+        data = self.redactor.obj(data)
+        self._seq += 1
+        try:
+            with open(self.run_dir / "events.jsonl", "a") as f:
+                f.write(json.dumps({"schema": SCHEMA_VERSION, "seq": self._seq, "t": round(time.time(), 2),
+                                    "type": kind, "data": data}, default=str) + "\n")
+        except OSError as e:
+            log.warning("could not persist event: %s", e)
+        self._sink(kind, data)
+
+    def _budget_exceeded(self) -> str | None:
+        """Hard limits so a confused model cannot burn money or run forever. Human wait time is
+        excluded from the clock: waiting 10 minutes for an approval is not the agent misbehaving."""
+        used = self.llm.stats.get("prompt_tokens", 0) + self.llm.stats.get("completion_tokens", 0)
+        if used > self.max_tokens_total:
+            return f"token budget exhausted ({used} > {self.max_tokens_total})"
+        active = time.monotonic() - self._t0 - self._human_wait_s
+        if active > self.max_active_seconds:
+            return f"time budget exhausted ({active:.0f}s > {self.max_active_seconds:.0f}s)"
+        return None
+
     # ======================================================================= public
     def run(self, task: str) -> Report:
         t0 = time.time()
+        self._t0 = time.monotonic()
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.emit("start", {"run_id": self.run_id, "task": task, "mode": self.mode, "model": self.llm.model})
-        self.browser = BrowserSession(self.run_dir / "shots", headless=self.headless).start()
-        self.tools = ToolBox(self.browser, self.workspace, self.memory)
+        self.browser = BrowserSession(self.run_dir / "shots", headless=self.headless,
+                                      gate_high_risk=self.mode != "autonomous").start()
+        self.tools = ToolBox(self.browser, self.workspace, self.memory, self.vault, self.redactor)
         try:
             report = self._run(task)
         except Exception as e:  # noqa: BLE001 - last line of defence: always return a report
@@ -88,8 +129,9 @@ class Agent:
             self.browser.close()
         report.duration_s = round(time.time() - t0, 1)
         report.llm = dict(self.llm.stats)
-        (self.run_dir / "report.json").write_text(json.dumps(asdict(report), indent=2))
-        self.emit("final", asdict(report))
+        safe = self.redactor.obj(asdict(report))
+        (self.run_dir / "report.json").write_text(json.dumps(safe, indent=2))
+        self.emit("final", safe)
         return report
 
     # ======================================================================= phases
@@ -100,8 +142,9 @@ class Agent:
         while True:
             fin = self._execute(brief)
             if fin is None:
+                why = self._budget_exceeded() or f"step limit ({self.max_steps}) reached"
                 return self._report(task, "budget_exhausted",
-                                    f"Stopped after {self.step} steps without finishing.", [])
+                                    f"Stopped after {self.step} steps without finishing: {why}.", [])
             status, summary, evidence = fin.get("status"), fin.get("summary", ""), fin.get("evidence", []) or []
             if status != "done":
                 return self._report(task, "needs_user" if status == "needs_user" else "failed", summary, evidence)
@@ -147,10 +190,14 @@ class Agent:
     # ======================================================================= main loop
     def _execute(self, brief: str) -> dict | None:
         self.brief = brief
-        sys = prompts.WORKER.replace("{playbook}", self._playbook_block())
+        sys = prompts.WORKER.replace("{playbook}", self._playbook_block()).replace(
+            "{sites}", ", ".join(self.vault.sites()) if self.vault else "none configured")
         seen_actions: dict[str, int] = {}
         error_streak = 0
         while self.step < self.max_steps:
+            if why := self._budget_exceeded():
+                self.emit("warning", {"message": f"Stopping: {why}"})
+                return None
             self.step += 1
             messages = self._messages(sys)
             resp = self.llm.chat(messages, tools=WORKER_TOOLS, require_tool=True)
@@ -219,14 +266,56 @@ class Agent:
             return ToolResult(f"BLOCKED by policy: {decision.reason}", "blocked by policy", ok=False)
         if decision.verdict == "approve":
             self.emit("policy", {"verdict": "approve", "reason": decision.reason, "risk": decision.risk})
-            shot = self.browser.last.screenshot if self.browser.last else None
-            a = self._ask_human("approval", f"{decision.reason}\n\nAgent's reasoning: {reasoning or '(none given)'}",
-                                screenshot=shot)
+            denied = self._approve_bound_action(name, args, decision.reason, reasoning)
+            if denied:
+                return denied
+            self.browser.preapprove("*")  # the human approved this button: allow the one request it sends
+        try:
+            return self.tools.run(name, args, self.step)
+        except ApprovalRequired as e:
+            return self._approve_network_request(name, args, e.key, reasoning)
+
+    def _approve_bound_action(self, name: str, args: dict, reason: str, reasoning: str) -> ToolResult | None:
+        """Ask for approval of one exact action on one exact page state. If the page changed while the human
+        was deciding, the approval no longer describes what would happen, so we ask again (max 3 times).
+        Returns a denial ToolResult, or None when approved for the current page."""
+        for _ in range(3):
+            snap = self.browser.last
+            fp = snap.fingerprint() if snap else ""
+            action = {"tool": name, "args": args, "url": snap.url if snap else "", "page_fingerprint": fp}
+            a = self._ask_human("approval", f"{reason}\n\nAgent's reasoning: {reasoning or '(none given)'}",
+                                screenshot=snap.screenshot if snap else None, action=action)
             if not a.get("approved"):
                 return ToolResult(f"DENIED by human: {a.get('comment') or 'no reason given'}. Do not retry this "
                                   "action. Continue without it or finish with status needs_user.", "denied by human",
                                   ok=False)
-        return self.tools.run(name, args, self.step)
+            now = self.browser.snapshot("approval-recheck") if snap else None
+            if now is None or now.fingerprint() == fp:
+                return None
+            self.emit("warning", {"message": "Page changed while waiting for approval; asking again",
+                                  "before": fp, "after": now.fingerprint()})
+            reason = f"(Re-approval: the page changed) {reason}"
+        return ToolResult("DENIED: the page kept changing during approval; not executed.", "approval unstable", ok=False)
+
+    def _approve_network_request(self, name: str, args: dict, key: str, reasoning: str) -> ToolResult:
+        """The browser aborted a high-risk request (e.g. POST /erp/bills/2/pay) that no button-level approval
+        covered, e.g. a form submitted with Enter or by page JavaScript. Ask, then replay the action once
+        with exactly that request allowed."""
+        self.emit("policy", {"verdict": "approve", "reason": f"network gate: {key}", "risk": "high"})
+        snap = self.browser.last
+        a = self._ask_human("approval", f"The action {name} {tool_args_preview(args)} tries to send the high-risk "
+                                        f"request {key}.\n\nAgent's reasoning: {reasoning or '(none given)'}",
+                            screenshot=snap.screenshot if snap else None,
+                            action={"tool": name, "args": args, "request": key})
+        if not a.get("approved"):
+            return ToolResult(f"DENIED by human: the request {key} was not sent. Do not retry it.",
+                              "denied by human", ok=False)
+        self.browser.preapprove(key)
+        try:
+            return self.tools.run(name, args, self.step)
+        except ApprovalRequired as e:
+            return ToolResult(f"BLOCKED: the action sent a different high-risk request ({e.key}) than the one "
+                              f"approved ({key}); nothing was sent.", "approval mismatch", ok=False)
 
     # ======================================================================= context management
     def _messages(self, system: str) -> list[dict]:
@@ -258,8 +347,10 @@ class Agent:
     # ======================================================================= verification
     def _verify(self, task: str, plan: dict, summary: str, evidence: list) -> dict:
         self.emit("verify_start", {"summary": summary})
-        vb = BrowserSession(self.run_dir / "verify", read_only=True).start(shared_context=self.browser.context)
-        tb = ToolBox(vb, self.workspace)
+        login_paths = frozenset(self.vault.login_paths()) if self.vault else frozenset()
+        vb = BrowserSession(self.run_dir / "verify", read_only=True, login_paths=login_paths).start(
+            shared_context=self.browser.context)
+        tb = ToolBox(vb, self.workspace, vault=self.vault, redactor=self.redactor)
         criteria = "\n".join(f"- {c}" for c in plan.get("success_criteria", [])) or "- (derive from the task)"
         msgs = [{"role": "system", "content": prompts.VERIFIER},
                 {"role": "user", "content": f"USER TASK:\n{task}\n\nSUCCESS CRITERIA:\n{criteria}\n\nWORKER'S CLAIM:\n"
@@ -267,6 +358,9 @@ class Agent:
                                             f"{json.dumps(self.memory.as_dict())}\n\nStart page: http://localhost:8001/"}]
         try:
             for vstep in range(1, 11):
+                if why := self._budget_exceeded():
+                    self.emit("warning", {"message": f"Verification stopped: {why}"})
+                    break
                 r = self.llm.chat(msgs, tools=VERIFIER_TOOLS, require_tool=True)
                 if not r.tool_calls:
                     msgs.append({"role": "user", "content": "Call a tool (verdict when done)."})
@@ -277,7 +371,10 @@ class Agent:
                          "evidence": c.arguments.get("evidence", [])}
                     self.emit("verify_result", v)
                     return v
-                res = tb.run(c.name, c.arguments, vstep)
+                try:
+                    res = tb.run(c.name, c.arguments, vstep)
+                except ApprovalRequired as e:  # unreachable in read-only mode; kept explicit
+                    res = ToolResult(f"BLOCKED: {e}", "blocked", ok=False)
                 self.emit("verify_step", {"tool": c.name, "args": tool_args_preview(c.arguments), "ok": res.ok,
                                           "text": res.text[:1500], "screenshot": self._rel(res.screenshot)})
                 msgs.append({"role": "assistant", "content": r.content or None, "tool_calls": [
@@ -310,10 +407,13 @@ class Agent:
             self.emit("warning", {"message": f"Could not distill playbook notes: {e}"})
 
     # ======================================================================= helpers
-    def _ask_human(self, kind: str, question: str, options: list | None = None, screenshot: str | None = None) -> dict:
+    def _ask_human(self, kind: str, question: str, options: list | None = None, screenshot: str | None = None,
+                   action: dict | None = None) -> dict:
         self.emit("human_request", {"kind": kind, "question": question, "options": options or [],
-                                    "screenshot": self._rel(screenshot)})
-        ans = self.human.ask(kind, question, options)
+                                    "screenshot": self._rel(screenshot), "action": action})
+        started = time.monotonic()
+        ans = self.human.ask(kind, self.redactor.text(question), options)
+        self._human_wait_s += time.monotonic() - started
         self.emit("human_response", {"kind": kind, **ans})
         return ans
 

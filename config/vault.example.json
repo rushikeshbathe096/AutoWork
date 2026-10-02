@@ -1,0 +1,4 @@
+{
+  "erp":  {"login_url": "http://localhost:8001/erp/login",  "username": "ap.clerk", "password": "ledger-42"},
+  "acme": {"login_url": "http://localhost:8001/acme/login", "username": "ourco-ap", "password": "Acme!2026"}
+}

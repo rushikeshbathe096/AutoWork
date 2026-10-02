@@ -21,3 +21,8 @@ def reset_workspace():
     if WORKSPACE.exists():
         shutil.rmtree(WORKSPACE)
     shutil.copytree(WORKSPACE_SEED, WORKSPACE)
+
+
+def admin_headers() -> dict[str, str]:
+    """Header for simworld's /admin endpoints (eval harness and world reset only, never the agent)."""
+    return {"X-Admin-Token": os.environ.get("SIMWORLD_ADMIN_TOKEN", "")}

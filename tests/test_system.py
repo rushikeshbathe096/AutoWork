@@ -5,84 +5,17 @@ compression, memory), not the model's intelligence. Run: .venv/bin/pytest -q
 """
 from __future__ import annotations
 
-import json
-import shutil
-import threading
-import time
-from pathlib import Path
-
 import httpx
-import pytest
-import uvicorn
 
 from agent import policy
 from agent.browser import Snapshot
-from agent.core import Agent
 from agent.human import ScriptedHuman
-from agent.llm import LLMResponse, ToolCall
 from agent.memory import Playbook
-
-ROOT = Path(__file__).resolve().parent.parent
-W = "http://localhost:8001"
-
-
-@pytest.fixture(scope="session", autouse=True)
-def world():
-    server = uvicorn.Server(uvicorn.Config("simworld.app:app", port=8001, log_level="warning"))
-    threading.Thread(target=server.run, daemon=True).start()
-    for _ in range(50):
-        try:
-            httpx.get(W + "/", timeout=1)
-            break
-        except httpx.HTTPError:
-            time.sleep(0.1)
-    yield
-    server.should_exit = True
-
-
-@pytest.fixture
-def ws(tmp_path):
-    shutil.copytree(ROOT / "workspace_seed", tmp_path / "ws")
-    return tmp_path / "ws"
-
-
-class FakeLLM:
-    """Replays a script. Items are dicts (JSON content) or (tool_name, args) tuples."""
-    model = "scripted"
-
-    def __init__(self, script):
-        self.script = list(script)
-        self.stats = {"calls": 0}
-        self.on_retry = None
-        self.seen: list[list[dict]] = []
-
-    def chat(self, messages, tools=None, require_tool=False, json_mode=False, **kw):
-        self.seen.append(messages)
-        self.stats["calls"] += 1
-        item = self.script.pop(0)
-        if isinstance(item, dict):
-            return LLMResponse(json.dumps(item), [])
-        name, args = item
-        return LLMResponse(f"next: {name}", [ToolCall(f"c{self.stats['calls']}", name, args, json.dumps(args))])
-
-
-PLAN = {"goal": "enter Acme invoice", "success_criteria": ["bill INV-2041 exists once"], "plan": [],
-        "assumptions": [], "blocking_questions": []}
-LOGIN = [("read_file", {"path": "credentials.md"}),
-         ("browser_goto", {"url": W + "/erp/bills/new"}),
-         ("browser_fill", {"fields": [{"element_id": 1, "value": "ap.clerk"}, {"element_id": 2, "value": "ledger-42"}]}),
-         ("browser_click", {"element_id": 3})]
-
-
-def make_agent(tmp_path, ws, script, human=None, **kw):
-    events = []
-    a = Agent(FakeLLM(script), human or ScriptedHuman(), ws, tmp_path / "runs", Playbook(tmp_path / "pb.json"),
-              emit=lambda k, d: events.append((k, d)), **kw)
-    return a, events
+from conftest import LOGIN, PLAN, W, admin_post, admin_state, make_agent
 
 
 def test_ambiguous_timeout_then_check_before_retry(tmp_path, ws):
-    httpx.post(W + "/admin/reset", json={"erp_submit_timeout": True})
+    admin_post("/admin/reset", {"erp_submit_timeout": True})
     script = [PLAN, *LOGIN,
               ("browser_fill", {"fields": [{"element_id": 6, "value": "Acme Supplies Inc."},
                                            {"element_id": 7, "value": "INV-2041"},
@@ -102,14 +35,14 @@ def test_ambiguous_timeout_then_check_before_retry(tmp_path, ws):
     assert r.status == "verified", r
     obs = [d for k, d in events if k == "observation"]
     assert any("HTTP STATUS: 504" in o["text"] for o in obs)
-    bills = [b for b in httpx.get(W + "/admin/state").json()["bills"] if b["invoice_number"] == "INV-2041"]
+    bills = [b for b in admin_state().json()["bills"] if b["invoice_number"] == "INV-2041"]
     assert len(bills) == 1 and bills[0]["amount_cents"] == 425000
     assert Playbook(tmp_path / "pb.json").load()[0]["note"].startswith("ERP login")
     assert (tmp_path / "runs" / r.run_id / "report.json").exists()
 
 
 def test_payment_requires_approval_and_denial_is_respected(tmp_path, ws):
-    httpx.post(W + "/admin/reset")
+    admin_post("/admin/reset", None)
     script = [PLAN, *LOGIN,
               ("browser_goto", {"url": W + "/erp/bills/2"}),
               ("browser_click", {"element_id": 6}),  # "Mark as paid"
@@ -119,12 +52,12 @@ def test_payment_requires_approval_and_denial_is_respected(tmp_path, ws):
     r = agent.run("Pay the Globex bill")
     assert r.status == "needs_user"
     assert human.log and human.log[0]["kind"] == "approval" and "Mark as paid" in human.log[0]["question"]
-    state = httpx.get(W + "/admin/state").json()
+    state = admin_state().json()
     assert next(b for b in state["bills"] if b["id"] == 2)["status"] == "open"
 
 
 def test_verifier_cannot_write(tmp_path, ws):
-    httpx.post(W + "/admin/reset")
+    admin_post("/admin/reset", None)
     script = [PLAN, *LOGIN,
               ("finish", {"status": "done", "summary": "done", "evidence": []}),
               ("browser_goto", {"url": W + "/erp/bills/2"}),
@@ -136,13 +69,13 @@ def test_verifier_cannot_write(tmp_path, ws):
     assert r.status == "failed"
     vsteps = [d for k, d in events if k == "verify_step"]
     assert any(not v["ok"] for v in vsteps), vsteps
-    assert next(b for b in httpx.get(W + "/admin/state").json()["bills"] if b["id"] == 2)["status"] == "open"
+    assert next(b for b in admin_state().json()["bills"] if b["id"] == 2)["status"] == "open"
     # the failed audit was fed back to the worker
     assert any("INDEPENDENT AUDIT FAILED" in str(m) for m in agent.llm.seen[-1])
 
 
 def test_loop_detection_escalates_to_human(tmp_path, ws):
-    httpx.post(W + "/admin/reset")
+    admin_post("/admin/reset", None)
     same = ("browser_goto", {"url": W + "/mail"})
     script = [PLAN, same, same, same, same, same, ("finish", {"status": "failed", "summary": "stuck", "evidence": []})]
     human = ScriptedHuman(answers={"stuck": "stop and report"})
@@ -153,7 +86,7 @@ def test_loop_detection_escalates_to_human(tmp_path, ws):
 
 
 def test_context_compression_keeps_memory(tmp_path, ws):
-    httpx.post(W + "/admin/reset")
+    admin_post("/admin/reset", None)
     script = [PLAN, ("browser_goto", {"url": W + "/mail"}), ("remember", {"key": "amount", "value": "4250.00"}),
               ("browser_goto", {"url": W + "/mail/1"}), ("browser_goto", {"url": W + "/mail/2"}),
               ("browser_goto", {"url": W + "/mail/3"}),

@@ -10,11 +10,12 @@ Faults can be injected via /admin/faults to exercise the agent's recovery logic:
 from __future__ import annotations
 
 import html
+import os
 import re
 import secrets
 from datetime import date, datetime
 
-from fastapi import FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from . import db
@@ -25,6 +26,16 @@ CREDENTIALS = {"acme": ("ourco-ap", "Acme!2026"), "erp": ("ap.clerk", "ledger-42
 FAULTS: dict = {"acme_login_flaky": False, "erp_submit_timeout": False, "erp_session_expiry": 0}
 _fault_state: dict = {}
 SESSIONS: dict[str, dict] = {}
+
+# The eval harness needs to reset the world and read ground truth; nobody else should. A random
+# token is generated per process unless SIMWORLD_ADMIN_TOKEN is set (needed when the harness runs
+# in a different process). setdefault() publishes it to in-process clients (run.py, tests, evals).
+ADMIN_TOKEN = os.environ.setdefault("SIMWORLD_ADMIN_TOKEN", secrets.token_urlsafe(24))
+
+
+def require_admin(x_admin_token: str = Header(default="")) -> None:
+    if not secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
+        raise HTTPException(403, "admin token required")
 
 
 def esc(v) -> str:
@@ -57,7 +68,7 @@ pre{{white-space:pre-wrap;background:#f1f5f9;padding:12px;border-radius:4px}}
 
 # --------------------------------------------------------------------------- admin (harness only)
 
-@app.post("/admin/reset")
+@app.post("/admin/reset", dependencies=[Depends(require_admin)])
 def admin_reset(faults: dict | None = None):
     db.reset()
     FAULTS.update({"acme_login_flaky": False, "erp_submit_timeout": False, "erp_session_expiry": 0})
@@ -68,14 +79,14 @@ def admin_reset(faults: dict | None = None):
     return {"ok": True, "faults": FAULTS}
 
 
-@app.post("/admin/faults")
+@app.post("/admin/faults", dependencies=[Depends(require_admin)])
 def admin_faults(faults: dict):
     FAULTS.update(faults)
     _fault_state.clear()
     return FAULTS
 
 
-@app.get("/admin/state")
+@app.get("/admin/state", dependencies=[Depends(require_admin)])
 def admin_state():
     return JSONResponse(db.ground_truth())
 

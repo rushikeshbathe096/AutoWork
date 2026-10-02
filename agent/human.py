@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import re
+import secrets
 import threading
-import uuid
 
 
 class CLIHuman:
@@ -48,7 +48,7 @@ class WebHuman:
         self._lock = threading.Lock()
 
     def ask(self, kind, question, options=None):
-        qid = uuid.uuid4().hex[:8]
+        qid = secrets.token_urlsafe(16)  # unguessable: 128 bits
         ev = threading.Event()
         with self._lock:
             self._pending[qid] = {"event": ev, "answer": None}
@@ -62,9 +62,10 @@ class WebHuman:
         return ans
 
     def respond(self, qid: str, answer: dict) -> bool:
+        """Single use: the first answer for a qid wins; later answers (replays, double clicks) are rejected."""
         with self._lock:
             p = self._pending.get(qid)
-            if not p:
+            if not p or p["answer"] is not None:
                 return False
             p["answer"] = answer
             p["event"].set()

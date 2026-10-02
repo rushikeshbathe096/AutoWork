@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="autowork-token" content="__AUTOWORK_TOKEN__">
 <title>AutoWork</title>
 <style>
 :root{--bg:#0b1020;--panel:#121a2e;--line:#22304f;--text:#e6ebf5;--muted:#8b98b5;--accent:#6ea8fe;--ok:#3ecf8e;--bad:#ff6b6b;--warn:#f5b945;--human:#c792ea}
@@ -33,7 +34,7 @@ button:disabled{opacity:.5;cursor:default}
 .verified{background:#12392b;color:var(--ok)} .failed,.error,.budget_exhausted{background:#3d1717;color:var(--bad)}
 .unverified,.needs_user{background:#3b2f12;color:var(--warn)} .running{background:#172a4d;color:var(--accent)}
 #ask{display:none;border:2px solid var(--human);background:#1d1630;border-radius:10px;padding:12px;margin-bottom:12px}
-#ask h3{margin:0 0 6px;color:var(--human);font-size:14px}
+#ask h3{margin:0 0 6px;color:var(--human);font-size:14px} .pre{white-space:pre-wrap}
 .runs a{color:var(--text);text-decoration:none;display:block;padding:4px 0;font-size:12px;border-bottom:1px solid var(--line)}
 .muted{color:var(--muted)} ul{padding-left:18px;margin:4px 0}
 @media (max-width:1100px){.grid{grid-template-columns:1fr;height:auto}}
@@ -74,6 +75,9 @@ button:disabled{opacity:.5;cursor:default}
   </div>
 </div>
 <script>
+// SECURITY: everything shown here (page text, emails, LLM output, tool args) is untrusted.
+// It is only ever inserted with textContent via el(); innerHTML is never used.
+const TOKEN = document.querySelector('meta[name="autowork-token"]').content;
 const PRESETS = [
   "Find the latest invoice from Acme, extract the amount and due date, enter it into our ERP, and tell me once it is done.",
   "Enter the Globex invoice from my email into the ERP.",
@@ -83,73 +87,95 @@ const PRESETS = [
   "Pay the latest Acme invoice in the ERP.",
   "Which open ERP bill is due soonest? Write a short summary of all open bills to open_bills.md in the workspace.",
 ];
+const STATUSES = new Set(['verified','unverified','failed','needs_user','budget_exhausted','error','running']);
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-PRESETS.forEach(p => { const b = document.createElement('button'); b.className='ghost preset'; b.textContent=p; b.onclick=()=>$('task').value=p; $('presets').appendChild(b); });
+function el(tag, cls, ...kids){
+  const e = document.createElement(tag); if (cls) e.className = cls;
+  for (const k of kids) { if (k == null) continue; e.append(k instanceof Node ? k : document.createTextNode(String(k))); }
+  return e;
+}
+const badge = st => el('span', 'badge ' + (STATUSES.has(st) ? st : 'error'), st);
+const clear = (id, placeholder) => { const n=$(id); n.replaceChildren(); if (placeholder!==undefined){ n.append(placeholder); n.classList.add('muted'); } else n.classList.remove('muted'); return n; };
+const api = (url, opts={}) => fetch(url, {...opts, headers: {'Content-Type':'application/json','X-AutoWork-Token':TOKEN, ...(opts.headers||{})}});
+PRESETS.forEach(p => { const b = el('button','ghost preset',p); b.onclick=()=>$('task').value=p; $('presets').append(b); });
 let es, runId;
 
-function add(cls, kind, html){ const d=document.createElement('div'); d.className='ev '+cls; d.innerHTML=`<div class="k">${kind}</div>${html}`; const t=$('timeline'); if(t.classList.contains('muted')){t.innerHTML='';t.classList.remove('muted')} t.appendChild(d); $('timelinePanel').scrollTop=1e9; }
-function shot(p, cap){ if(!p) return; $('shot').src='/files/'+p; $('shot').style.display='block'; $('shotcap').textContent=cap||''; }
+function add(cls, kind, ...body){
+  const t=$('timeline'); if (t.classList.contains('muted')) clear('timeline');
+  t.append(el('div','ev '+cls, el('div','k',kind), ...body)); $('timelinePanel').scrollTop=1e9;
+}
+function details(summary, full){ const d=el('details',null, el('summary',null,summary)); d.append(full); return d; }
+function shot(p, cap){ if(!p) return; $('shot').src='/files/'+encodeURI(p); $('shot').style.display='block'; $('shotcap').textContent=cap||''; }
 $('shot').onclick=()=>window.open($('shot').src);
+const list = (tag, items) => { const l=el(tag); (items||[]).forEach(x=>l.append(el('li',null,x))); return l; };
 
 function handle(e){
   const d=e.data;
   switch(e.type){
-    case 'start': $('status').innerHTML=`<span class="badge running">running</span> ${esc(d.model)} · ${esc(d.mode)}`; add('plan','start',esc(d.task)); break;
+    case 'start': clear('status').append(badge('running'), ` ${d.model} · ${d.mode}`); add('plan','start',d.task); break;
     case 'plan':
-      $('plan').innerHTML=`<b>${esc(d.goal)}</b><ol>${(d.plan||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="muted">Success criteria:</div><ul>${(d.success_criteria||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ul>`;
-      add('plan','plan',`${esc(d.goal)}${(d.assumptions||[]).length?`\n<span class="muted">Assumptions: ${esc(d.assumptions.join('; '))}</span>`:''}`); break;
-    case 'thought': add('thought',`step ${d.step} · reasoning`,esc(d.text)); break;
-    case 'action': add('action',`step ${d.step} · action`,`<b>${esc(d.tool)}</b> ${esc(d.args)}`); break;
-    case 'observation': {
-      const first=d.text.split('\n').slice(0,3).join('\n');
-      add(d.ok?'obs-ok':'obs-bad', d.ok?'observation':'observation · failed', `<details><summary>${esc(first)}</summary>${esc(d.text)}</details>`);
-      shot(d.screenshot, `step ${d.step} · ${d.tool}`); break; }
-    case 'memory': $('memory').classList.remove('muted'); $('memory').innerHTML=Object.entries(d).map(([k,v])=>`<b>${esc(k)}</b><span>${esc(v)}</span>`).join(''); break;
-    case 'policy': add('policy','policy gate',esc(d.verdict+': '+d.reason)); break;
-    case 'human_request': add('human_request','asking human · '+d.kind,esc(d.question)); if(d.screenshot) shot(d.screenshot,'page awaiting approval'); break;
+      clear('plan').append(el('b',null,d.goal), list('ol',d.plan), el('div','muted','Success criteria:'), list('ul',d.success_criteria));
+      add('plan','plan', d.goal, (d.assumptions||[]).length ? el('div','muted','Assumptions: '+d.assumptions.join('; ')) : null); break;
+    case 'thought': add('thought',`step ${d.step} · reasoning`, d.text); break;
+    case 'action': add('action',`step ${d.step} · action`, el('b',null,d.tool), ' ', d.args); break;
+    case 'observation':
+      add(d.ok?'obs-ok':'obs-bad', d.ok?'observation':'observation · failed', details(d.text.split('\n').slice(0,3).join('\n'), d.text));
+      shot(d.screenshot, `step ${d.step} · ${d.tool}`); break;
+    case 'memory': { const m=clear('memory'); Object.entries(d).forEach(([k,v])=>m.append(el('b',null,k), el('span',null,v))); break; }
+    case 'policy': add('policy','policy gate', `${d.verdict}: ${d.reason}`); break;
+    case 'human_request': add('human_request','asking human · '+d.kind, d.question); if(d.screenshot) shot(d.screenshot,'page awaiting approval'); break;
     case 'waiting_for_human': showAsk(d); break;
-    case 'human_response': $('ask').style.display='none'; add('human_response','human answered',esc(d.answer ?? ((d.approved?'APPROVED':'DENIED')+(d.comment?': '+d.comment:'')))); break;
-    case 'warning': case 'error': case 'llm_retry': add(e.type,e.type,esc(d.message||'')+(d.reason?'\n'+esc(d.reason):'')); break;
+    case 'human_response': $('ask').style.display='none'; add('human_response','human answered', d.answer ?? ((d.approved?'APPROVED':'DENIED')+(d.comment?': '+d.comment:''))); break;
+    case 'warning': case 'error': case 'llm_retry': add(e.type, e.type, (d.message||'') + (d.reason ? '\n'+d.reason : '')); break;
     case 'verify_start': add('verify','independent verification','Auditor (fresh context, read-only browser) is checking the real system state…'); break;
-    case 'verify_step': add('verify','auditor · '+esc(d.tool),`<details><summary>${esc(d.args)}</summary>${esc(d.text)}</details>`); shot(d.screenshot,'auditor view'); break;
-    case 'verify_result': add('verify', d.passed?'verification PASSED':'verification FAILED', esc(d.reason)+'\n'+esc((d.evidence||[]).join('\n'))); break;
-    case 'learned': add('plan','learned for next time',esc((d.notes||[]).join('\n'))); loadPlaybook(); break;
-    case 'final': {
-      $('status').innerHTML=`<span class="badge ${d.status}">${d.status}</span> ${d.steps} steps · ${d.duration_s}s · ${d.llm.calls} LLM calls`;
-      $('result').classList.remove('muted');
-      $('result').innerHTML=`<span class="badge ${d.status}">${d.status}</span><p>${esc(d.summary)}</p><ul>${d.evidence.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>${d.verification?`<div class="muted">Audit: ${esc(d.verification.reason)}</div>`:''}`;
-      add('final','final · '+d.status,esc(d.summary)); $('go').disabled=false; loadRuns(); break; }
+    case 'verify_step': add('verify','auditor · '+d.tool, details(d.args, d.text)); shot(d.screenshot,'auditor view'); break;
+    case 'verify_result': add('verify', d.passed?'verification PASSED':'verification FAILED', d.reason+'\n'+(d.evidence||[]).join('\n')); break;
+    case 'learned': add('plan','learned for next time', (d.notes||[]).join('\n')); loadPlaybook(); break;
+    case 'final':
+      clear('status').append(badge(d.status), ` ${d.steps} steps · ${d.duration_s}s · ${d.llm.calls} LLM calls`);
+      clear('result').append(badge(d.status), el('p',null,d.summary), list('ul',d.evidence), d.verification ? el('div','muted','Audit: '+d.verification.reason) : null);
+      add('final','final · '+d.status, d.summary); $('go').disabled=false; loadRuns(); break;
   }
 }
 function showAsk(d){
-  const a=$('ask'); a.style.display='block';
-  if(d.kind==='approval'){
-    a.innerHTML=`<h3>Approval required</h3><div style="white-space:pre-wrap">${esc(d.question)}</div><input type="text" id="cmt" placeholder="optional comment" style="margin:8px 0"><div class="row"><button id="yes">Approve</button><button class="ghost" id="no">Deny</button></div>`;
-    $('yes').onclick=()=>respond({qid:d.qid,approved:true,comment:$('cmt').value});
-    $('no').onclick=()=>respond({qid:d.qid,approved:false,comment:$('cmt').value});
+  const a=$('ask'); a.replaceChildren(); a.style.display='block';
+  a.append(el('h3',null, d.kind==='approval' ? 'Approval required' : 'The agent needs your input'), el('div','pre', d.question));
+  if (d.kind==='approval'){
+    const cmt=el('input'); cmt.type='text'; cmt.placeholder='optional comment'; cmt.style.margin='8px 0';
+    const yes=el('button',null,'Approve'), no=el('button','ghost','Deny');
+    yes.onclick=()=>respond({qid:d.qid,approved:true,comment:cmt.value});
+    no.onclick=()=>respond({qid:d.qid,approved:false,comment:cmt.value});
+    a.append(cmt, el('div','row',yes,no));
   } else {
-    a.innerHTML=`<h3>The agent needs your input</h3><div style="white-space:pre-wrap">${esc(d.question)}</div><div class="row" id="opts"></div><input type="text" id="ans" placeholder="your answer"><div class="row"><button id="send">Send</button></div>`;
-    (d.options||[]).forEach(o=>{const b=document.createElement('button');b.className='ghost';b.textContent=o;b.onclick=()=>respond({qid:d.qid,answer:o});$('opts').appendChild(b)});
-    $('send').onclick=()=>respond({qid:d.qid,answer:$('ans').value});
+    const opts=el('div','row'); (d.options||[]).forEach(o=>{const b=el('button','ghost',o); b.onclick=()=>respond({qid:d.qid,answer:o}); opts.append(b)});
+    const ans=el('input'); ans.type='text'; ans.placeholder='your answer';
+    const send=el('button',null,'Send'); send.onclick=()=>respond({qid:d.qid,answer:ans.value});
+    a.append(opts, ans, el('div','row',send));
   }
   a.scrollIntoView();
 }
-async function respond(body){ await fetch(`/api/runs/${runId}/answer`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
+async function respond(body){ await api(`/api/runs/${encodeURIComponent(runId)}/answer`,{method:'POST',body:JSON.stringify(body)}); }
 function watch(id){
   runId=id; if(es) es.close();
-  ['timeline','plan','memory','result'].forEach(x=>{$(x).innerHTML='-';$(x).classList.add('muted')}); $('shot').style.display='none';
-  es=new EventSource(`/api/runs/${id}/events`); es.onmessage=m=>handle(JSON.parse(m.data)); es.onerror=()=>es.close();
+  ['timeline','plan','memory','result'].forEach(x=>clear(x,'-')); $('shot').style.display='none';
+  es=new EventSource(`/api/runs/${encodeURIComponent(id)}/events`); es.onmessage=m=>handle(JSON.parse(m.data)); es.onerror=()=>es.close();
 }
 $('go').onclick=async()=>{
-  const faults={}; if($('f1').checked) faults.acme_login_flaky=true; if($('f2').checked) faults.erp_submit_timeout=true; if($('f3').checked) faults.erp_session_expiry=3;
+  const faults={acme_login_flaky:$('f1').checked, erp_submit_timeout:$('f2').checked, erp_session_expiry:$('f3').checked?3:0};
   $('go').disabled=true;
-  const r=await fetch('/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task:$('task').value,mode:$('mode').value,use_playbook:$('pb').checked,reset_world:$('reset').checked,faults})});
-  const j=await r.json(); if(!r.ok){alert(j.detail);$('go').disabled=false;return} watch(j.run_id);
+  const r=await api('/api/runs',{method:'POST',body:JSON.stringify({task:$('task').value,mode:$('mode').value,use_playbook:$('pb').checked,reset_world:$('reset').checked,faults})});
+  const j=await r.json(); if(!r.ok){alert(typeof j.detail==='string'?j.detail:JSON.stringify(j.detail));$('go').disabled=false;return} watch(j.run_id);
 };
-$('clearpb').onclick=async()=>{await fetch('/api/playbook',{method:'DELETE'});loadPlaybook()};
-async function loadRuns(){ const r=await (await fetch('/api/runs')).json(); $('runs').innerHTML=r.map(x=>`<a href="#" data-id="${x.run_id}"><span class="badge ${x.status}">${x.status}</span> ${esc(x.task.slice(0,60))}</a>`).join('')||'<span class="muted">none</span>'; $('runs').querySelectorAll('a').forEach(a=>a.onclick=ev=>{ev.preventDefault();watch(a.dataset.id)}); }
-async function loadPlaybook(){ const p=await (await fetch('/api/playbook')).json(); $('playbook').innerHTML=p.length?'<ul>'+p.map(n=>`<li>${esc(n.note)}</li>`).join('')+'</ul>':'(empty: notes appear after a verified run)'; }
+$('clearpb').onclick=async()=>{await api('/api/playbook',{method:'DELETE'}); loadPlaybook()};
+async function loadRuns(){
+  const r=await (await fetch('/api/runs')).json(); const box=clear('runs');
+  if(!r.length){ box.append(el('span','muted','none')); return; }
+  r.forEach(x=>{ const a=el('a',null,badge(x.status),' ',x.task.slice(0,60)); a.href='#'; a.onclick=ev=>{ev.preventDefault();watch(x.run_id)}; box.append(a); });
+}
+async function loadPlaybook(){
+  const p=await (await fetch('/api/playbook')).json();
+  if(p.length) clear('playbook').append(list('ul',p.map(n=>n.note))); else clear('playbook','(empty: notes appear after a verified run)');
+}
 loadRuns(); loadPlaybook();
 </script>
 </body>

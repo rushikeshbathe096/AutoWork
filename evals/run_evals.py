@@ -17,11 +17,12 @@ from pathlib import Path
 import httpx
 import uvicorn
 
-from agent.config import PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, WORLD_URL, reset_workspace
+from agent.config import PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, WORLD_URL, admin_headers, reset_workspace
 from agent.core import Agent
 from agent.human import ScriptedHuman
 from agent.llm import LLMClient
 from agent.memory import Playbook
+from agent.vault import Vault
 
 from .tasks import TASKS
 
@@ -59,15 +60,17 @@ def main():
         for rep in range(a.repeat):
             if not a.playbook:
                 pb_path.unlink(missing_ok=True)
-            httpx.post(f"{WORLD_URL}/admin/reset", json=t["faults"] or None, timeout=10)
+            httpx.post(f"{WORLD_URL}/admin/reset", json=t["faults"] or None, headers=admin_headers(),
+                       timeout=10).raise_for_status()
             reset_workspace()
             human = ScriptedHuman(approve=t.get("approve", False), answers=t.get("answers"))
             emit = (lambda k, d: None) if a.quiet else (
                 lambda k, d, tid=t["id"]: print(f"  [{tid}] {k}: {json.dumps(d, default=str)[:160]}", flush=True))
-            agent = Agent(LLMClient(), human, WORKSPACE, RUNS_DIR, Playbook(pb_path), emit=emit, mode=a.mode)
+            agent = Agent(LLMClient(), human, WORKSPACE, RUNS_DIR, Playbook(pb_path), emit=emit, mode=a.mode,
+                          vault=Vault.load())
             print(f"\n=== {t['id']} (rep {rep + 1}) ===", flush=True)
             report = agent.run(t["task"])
-            state = httpx.get(f"{WORLD_URL}/admin/state", timeout=10).json()
+            state = httpx.get(f"{WORLD_URL}/admin/state", headers=admin_headers(), timeout=10).json()
             try:
                 errs = t["check"](state, report, human, WORKSPACE)
             except Exception as e:  # noqa: BLE001

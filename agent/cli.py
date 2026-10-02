@@ -10,6 +10,7 @@ from .core import Agent
 from .human import CLIHuman
 from .llm import LLMClient
 from .memory import Playbook
+from .vault import Vault
 
 COLORS = {"plan": "36", "thought": "37", "action": "33", "observation": "90", "warning": "31", "error": "31",
           "human_request": "35", "verify_result": "32", "policy": "35", "llm_retry": "31", "learned": "34"}
@@ -51,7 +52,7 @@ def main(argv=None):
     if a.reset_workspace or not WORKSPACE.exists():
         reset_workspace()
     agent = Agent(LLMClient(), CLIHuman(), WORKSPACE, RUNS_DIR, None if a.no_playbook else Playbook(PLAYBOOK_PATH),
-                  emit=printer, mode=a.mode, max_steps=a.max_steps, headless=not a.headed)
+                  emit=printer, mode=a.mode, max_steps=a.max_steps, headless=not a.headed, vault=Vault.load())
     r = agent.run(a.task)
     sys.exit(0 if r.status == "verified" else 1)
 
