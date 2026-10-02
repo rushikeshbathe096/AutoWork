@@ -6,6 +6,7 @@
 
 Starts the simulated world itself if it isn't running. Writes evals/results.md and results.json.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,7 +18,7 @@ from pathlib import Path
 import httpx
 import uvicorn
 
-from agent.config import PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, WORLD_URL, admin_headers, reset_workspace
+from agent.config import PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, WORLD_URL, Settings, admin_headers, reset_workspace
 from agent.core import Agent
 from agent.human import ScriptedHuman
 from agent.llm import LLMClient
@@ -53,6 +54,7 @@ def main():
     ap.add_argument("--mode", default="balanced")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
+    settings = Settings.from_env()
     ensure_world()
     pb_path = PLAYBOOK_PATH if a.playbook else HERE / ".eval_playbook.json"
     rows = []
@@ -60,14 +62,28 @@ def main():
         for rep in range(a.repeat):
             if not a.playbook:
                 pb_path.unlink(missing_ok=True)
-            httpx.post(f"{WORLD_URL}/admin/reset", json=t["faults"] or None, headers=admin_headers(),
-                       timeout=10).raise_for_status()
+            httpx.post(
+                f"{WORLD_URL}/admin/reset", json=t["faults"] or None, headers=admin_headers(), timeout=10
+            ).raise_for_status()
             reset_workspace()
             human = ScriptedHuman(approve=t.get("approve", False), answers=t.get("answers"))
-            emit = (lambda k, d: None) if a.quiet else (
-                lambda k, d, tid=t["id"]: print(f"  [{tid}] {k}: {json.dumps(d, default=str)[:160]}", flush=True))
-            agent = Agent(LLMClient(), human, WORKSPACE, RUNS_DIR, Playbook(pb_path), emit=emit, mode=a.mode,
-                          vault=Vault.load())
+            emit = (
+                (lambda k, d: None)
+                if a.quiet
+                else (lambda k, d, tid=t["id"]: print(f"  [{tid}] {k}: {json.dumps(d, default=str)[:160]}", flush=True))
+            )
+            agent = Agent(
+                LLMClient(settings),
+                human,
+                WORKSPACE,
+                RUNS_DIR,
+                Playbook(pb_path),
+                emit=emit,
+                mode=a.mode,
+                vault=Vault.load(),
+                max_tokens_total=settings.max_tokens_total,
+                max_active_seconds=settings.max_active_seconds,
+            )
             print(f"\n=== {t['id']} (rep {rep + 1}) ===", flush=True)
             report = agent.run(t["task"])
             state = httpx.get(f"{WORLD_URL}/admin/state", headers=admin_headers(), timeout=10).json()
@@ -78,23 +94,39 @@ def main():
             passed = not errs
             # "honest" = the agent's self-assessment agrees with ground truth
             honest = (report.status == "verified") == passed or t["id"] == "payment_needs_approval"
-            rows.append(dict(task=t["id"], rep=rep + 1, passed=passed, agent_status=report.status, honest=honest,
-                             steps=report.steps, seconds=report.duration_s, llm_calls=report.llm.get("calls"),
-                             tokens=report.llm.get("prompt_tokens", 0) + report.llm.get("completion_tokens", 0),
-                             errors=errs, run_id=report.run_id, summary=report.summary,
-                             human=human.log))
+            rows.append(
+                dict(
+                    task=t["id"],
+                    rep=rep + 1,
+                    passed=passed,
+                    agent_status=report.status,
+                    honest=honest,
+                    steps=report.steps,
+                    seconds=report.duration_s,
+                    llm_calls=report.llm.get("calls"),
+                    tokens=report.llm.get("prompt_tokens", 0) + report.llm.get("completion_tokens", 0),
+                    errors=errs,
+                    run_id=report.run_id,
+                    summary=report.summary,
+                    human=human.log,
+                )
+            )
             print(f"--> {'PASS' if passed else 'FAIL'} agent={report.status} steps={report.steps} {errs}", flush=True)
 
     (HERE / "results.json").write_text(json.dumps(rows, indent=2, default=str))
     n = len(rows)
-    lines = [f"# Eval results ({time.strftime('%Y-%m-%d %H:%M')}, model `{LLMClient().model}`)\n",
-             f"**Ground-truth pass rate: {sum(r['passed'] for r in rows)}/{n}** · "
-             f"self-assessment matches ground truth: {sum(r['honest'] for r in rows)}/{n}\n",
-             "| task | result | agent status | steps | time (s) | LLM calls | tokens | notes |",
-             "|---|---|---|---|---|---|---|---|"]
+    lines = [
+        f"# Eval results ({time.strftime('%Y-%m-%d %H:%M')}, model `{settings.llm_model}`)\n",
+        f"**Ground-truth pass rate: {sum(r['passed'] for r in rows)}/{n}** · "
+        f"self-assessment matches ground truth: {sum(r['honest'] for r in rows)}/{n}\n",
+        "| task | result | agent status | steps | time (s) | LLM calls | tokens | notes |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
     for r in rows:
-        lines.append(f"| {r['task']} | {'✅' if r['passed'] else '❌'} | {r['agent_status']} | {r['steps']} | "
-                     f"{r['seconds']} | {r['llm_calls']} | {r['tokens']} | {'; '.join(r['errors'])[:120]} |")
+        lines.append(
+            f"| {r['task']} | {'✅' if r['passed'] else '❌'} | {r['agent_status']} | {r['steps']} | "
+            f"{r['seconds']} | {r['llm_calls']} | {r['tokens']} | {'; '.join(r['errors'])[:120]} |"
+        )
     (HERE / "results.md").write_text("\n".join(lines) + "\n")
     print("\n" + "\n".join(lines))
 

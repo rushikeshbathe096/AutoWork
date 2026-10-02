@@ -1,4 +1,5 @@
 """Ways for the agent to reach a human. The agent only sees the `ask(kind, question, options)` interface."""
+
 from __future__ import annotations
 
 import re
@@ -21,8 +22,12 @@ class ScriptedHuman:
     """For evals: answers from a script. `approvals` is a bool or a list of regex->bool rules;
     `answers` maps a regex on the question to an answer."""
 
-    def __init__(self, approve: bool | list = False, answers: dict[str, str] | None = None,
-                 default_answer: str = "I don't have more information. Use your best judgment; if unsafe, stop."):
+    def __init__(
+        self,
+        approve: bool | list = False,
+        answers: dict[str, str] | None = None,
+        default_answer: str = "I don't have more information. Use your best judgment; if unsafe, stop.",
+    ):
         self.approve, self.answers, self.default = approve, answers or {}, default_answer
         self.log: list[dict] = []
 
@@ -57,8 +62,11 @@ class WebHuman:
         with self._lock:
             ans = self._pending.pop(qid)["answer"]
         if not got or ans is None:
-            return {"approved": False, "comment": "No response (timed out)"} if kind == "approval" else \
-                {"answer": "No response from user (timed out). Do not take risky actions; finish with needs_user."}
+            return (
+                {"approved": False, "comment": "No response (timed out)"}
+                if kind == "approval"
+                else {"answer": "No response from user (timed out). Do not take risky actions; finish with needs_user."}
+            )
         return ans
 
     def respond(self, qid: str, answer: dict) -> bool:

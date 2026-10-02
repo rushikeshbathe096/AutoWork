@@ -1,0 +1,39 @@
+[project]
+name = "autowork"
+version = "0.2.0"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = [".venv", "runs", "data", "workspace"]
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I isort, B bugbear, UP pyupgrade, SIM simplify, BLE blind-except, S bandit (security)
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "BLE", "S"]
+ignore = [
+  "S101",  # assert is fine in tests
+  "S311",  # random is not used for crypto here; secrets module is used where it matters
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B", "BLE"]
+"simworld/*" = ["B008", "S", "E501"]  # FastAPI Form()/Depends() defaults; long inline HTML templates
+"evals/*" = ["E731"]          # compact lambda checks in the task table
+
+[tool.mypy]
+python_version = "3.12"
+files = ["agent", "server"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+pythonpath = [".", "tests"]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["agent", "server", "simworld"]
+concurrency = ["greenlet", "thread"]

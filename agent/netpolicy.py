@@ -8,6 +8,7 @@ bypassable in three ways, all reproduced before this fix:
   * page JavaScript:    fetch('/admin/state')
 Every request is normalised the same way the server would interpret it, then checked.
 """
+
 from __future__ import annotations
 
 import posixpath
@@ -19,16 +20,19 @@ DEFAULT_PORTS = {"http": 80, "https": 443}
 LOOPBACK_ALIASES = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 # Paths whose non-GET requests move money, destroy data or change payment details.
-HIGH_RISK_PATH = re.compile(r"/(pay|payment|payments|delete|remove|transfer|wire|refund|approve|cancel)(/|$)"
-                            r"|bank|iban|payout", re.I)
+HIGH_RISK_PATH = re.compile(
+    r"/(pay|payment|payments|delete|remove|transfer|wire|refund|approve|cancel)(/|$)"
+    r"|bank|iban|payout",
+    re.I,
+)
 
 
 @dataclass(frozen=True)
 class NormalizedURL:
     scheme: str
-    host: str      # lowercase; loopback aliases collapsed to "localhost"
+    host: str  # lowercase; loopback aliases collapsed to "localhost"
     port: int
-    path: str      # fully percent-decoded, dot-segments resolved, slashes collapsed
+    path: str  # fully percent-decoded, dot-segments resolved, slashes collapsed
 
 
 def normalize(url: str) -> NormalizedURL | None:

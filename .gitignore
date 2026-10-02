@@ -7,3 +7,6 @@ workspace/
 evals/.eval_playbook.json
 .pytest_cache/
 config/vault.json
+.coverage
+.mypy_cache/
+.ruff_cache/

@@ -1,5 +1,6 @@
 """Start everything: the simulated company world (:8001) and the AutoWork control UI (:8000).
 Both bind to 127.0.0.1 only."""
+
 import logging
 import threading
 

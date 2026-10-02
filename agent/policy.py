@@ -9,6 +9,7 @@ Modes:
   balanced    - approval for high-risk actions (payments, deletion, money movement)   [default]
   supervised  - approval also for any data-changing submit (save/create/update/send)
 """
+
 from __future__ import annotations
 
 import re
@@ -35,10 +36,12 @@ def evaluate(tool: str, args: dict, snapshot, mode: str = "balanced") -> Decisio
         if is_control and HIGH_RISK.search(label):
             risk = "high"
             if mode != "autonomous":
-                return Decision("approve", f"Irreversible action: pressing \"{label.strip()}\" on {snapshot.url}", risk)
+                return Decision("approve", f'Irreversible action: pressing "{label.strip()}" on {snapshot.url}', risk)
         if is_control and WRITE.search(label) and not snapshot.has_password:
             if mode == "supervised":
-                return Decision("approve", f"Data-changing action: pressing \"{label.strip()}\" on {snapshot.url}", "medium")
+                return Decision(
+                    "approve", f'Data-changing action: pressing "{label.strip()}" on {snapshot.url}', "medium"
+                )
             return Decision("allow", risk="medium")
     if tool == "write_file":
         p = str(args.get("path", ""))

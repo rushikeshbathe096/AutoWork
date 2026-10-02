@@ -11,6 +11,7 @@ Source of secrets, first match wins:
   3. config/vault.example.json, the demo credentials of the *simulated* apps, so a fresh
      clone works. A warning is logged when this fallback is used.
 """
+
 from __future__ import annotations
 
 import json
@@ -63,6 +64,7 @@ class Vault:
     def login_paths(self) -> set[str]:
         """Exact login form paths; the read-only verifier may POST only to these."""
         from urllib.parse import urlparse
+
         return {urlparse(c.login_url).path for c in self._creds.values()}
 
 

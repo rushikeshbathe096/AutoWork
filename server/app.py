@@ -1,4 +1,5 @@
 """Control-plane web app: start runs, stream events (SSE), answer approval/clarification requests."""
+
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from agent.config import PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, WORLD_URL, admin_headers, reset_workspace
+from agent.config import PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, WORLD_URL, Settings, admin_headers, reset_workspace
 from agent.core import Agent
 from agent.human import WebHuman
 from agent.llm import LLMClient, LLMError
@@ -110,13 +111,25 @@ def start_run(req: StartReq):
         reset_workspace()
     if not WORKSPACE.exists():
         reset_workspace()
+    settings = Settings.from_env()
     try:
-        llm = LLMClient()
+        llm = LLMClient(settings)
     except LLMError as e:
         raise HTTPException(400, str(e)) from e
     run = Run()
-    agent = Agent(llm, run.human, WORKSPACE, RUNS_DIR, Playbook(PLAYBOOK_PATH) if req.use_playbook else None,
-                  emit=run.emit, mode=req.mode, max_steps=req.max_steps, vault=Vault.load())
+    agent = Agent(
+        llm,
+        run.human,
+        WORKSPACE,
+        RUNS_DIR,
+        Playbook(PLAYBOOK_PATH) if req.use_playbook else None,
+        emit=run.emit,
+        mode=req.mode,
+        max_steps=req.max_steps,
+        vault=Vault.load(),
+        max_tokens_total=settings.max_tokens_total,
+        max_active_seconds=settings.max_active_seconds,
+    )
     (RUNS_DIR / agent.run_id).mkdir(parents=True, exist_ok=True)
     run.id = agent.run_id
     RUNS[run.id] = run
@@ -126,6 +139,7 @@ def start_run(req: StartReq):
             agent.run(req.task)
         finally:
             run.done = True
+
     threading.Thread(target=work, daemon=True, name=f"run-{run.id}").start()
     return {"run_id": run.id}
 
@@ -160,6 +174,7 @@ async def events(rid: str):
         async def replay():
             for e in past:
                 yield f"data: {json.dumps(e, default=str)}\n\n"
+
         return StreamingResponse(replay(), media_type="text/event-stream")
 
     async def stream():
@@ -171,6 +186,7 @@ async def events(rid: str):
             if run.done and i >= len(run.events):
                 break
             await asyncio.sleep(0.25)
+
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
@@ -179,8 +195,9 @@ def answer(rid: str, req: AnswerReq):
     run = RUNS.get(rid)
     if not run:
         raise HTTPException(404)
-    payload = {"approved": bool(req.approved), "comment": req.comment} if req.approved is not None else \
-        {"answer": req.answer}
+    payload = (
+        {"approved": bool(req.approved), "comment": req.comment} if req.approved is not None else {"answer": req.answer}
+    )
     if not run.human.respond(req.qid, payload):
         raise HTTPException(404, "No such pending question")
     return {"ok": True}
@@ -199,7 +216,8 @@ def clear_playbook():
 
 @app.post("/api/world/reset")
 def world_reset(faults: Faults | None = None):
-    r = httpx.post(f"{WORLD_URL}/admin/reset", json=faults.model_dump() if faults else None,
-                   headers=admin_headers(), timeout=10)
+    r = httpx.post(
+        f"{WORLD_URL}/admin/reset", json=faults.model_dump() if faults else None, headers=admin_headers(), timeout=10
+    )
     reset_workspace()
     return r.json()

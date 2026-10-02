@@ -8,6 +8,7 @@ Playbook - lessons distilled from previous *verified-successful* runs (where thi
     flows, input format quirks, pitfalls). Injected into future runs as hints. This is the
     "turn a successful experiment into a reusable capability" loop.
 """
+
 from __future__ import annotations
 
 import json
@@ -62,4 +63,4 @@ class Playbook:
                     existing.append({"note": note, "run": run_id, "at": datetime.now().isoformat(timespec="seconds")})
                     seen.add(note.lower())
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(existing[-self.max_notes:], indent=2))
+            self.path.write_text(json.dumps(existing[-self.max_notes :], indent=2))

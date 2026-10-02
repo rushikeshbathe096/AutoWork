@@ -1,19 +1,32 @@
 """Terminal entry point:  python -m agent.cli "Find the latest Acme invoice and enter it into the ERP" """
+
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 
-from .config import PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, reset_workspace
+from .config import MODES, PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, Settings, reset_workspace
 from .core import Agent
 from .human import CLIHuman
 from .llm import LLMClient
 from .memory import Playbook
 from .vault import Vault
 
-COLORS = {"plan": "36", "thought": "37", "action": "33", "observation": "90", "warning": "31", "error": "31",
-          "human_request": "35", "verify_result": "32", "policy": "35", "llm_retry": "31", "learned": "34"}
+COLORS = {
+    "plan": "36",
+    "thought": "37",
+    "action": "33",
+    "observation": "90",
+    "warning": "31",
+    "error": "31",
+    "human_request": "35",
+    "verify_result": "32",
+    "policy": "35",
+    "llm_retry": "31",
+    "learned": "34",
+}
 
 
 def printer(kind: str, data: dict):
@@ -40,19 +53,33 @@ def printer(kind: str, data: dict):
     print(f"\033[{c}m[{kind}] {msg}\033[0m", flush=True)
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> None:
+    settings = Settings.from_env()
     ap = argparse.ArgumentParser(description="AutoWork autonomous task worker")
     ap.add_argument("task")
-    ap.add_argument("--mode", default="balanced", choices=["autonomous", "balanced", "supervised"])
-    ap.add_argument("--max-steps", type=int, default=40)
+    ap.add_argument("--mode", default=settings.mode, choices=MODES)
+    ap.add_argument("--max-steps", type=int, default=settings.max_steps)
     ap.add_argument("--headed", action="store_true", help="show the browser window")
     ap.add_argument("--no-playbook", action="store_true")
     ap.add_argument("--reset-workspace", action="store_true")
     a = ap.parse_args(argv)
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     if a.reset_workspace or not WORKSPACE.exists():
         reset_workspace()
-    agent = Agent(LLMClient(), CLIHuman(), WORKSPACE, RUNS_DIR, None if a.no_playbook else Playbook(PLAYBOOK_PATH),
-                  emit=printer, mode=a.mode, max_steps=a.max_steps, headless=not a.headed, vault=Vault.load())
+    agent = Agent(
+        LLMClient(settings),
+        CLIHuman(),
+        WORKSPACE,
+        RUNS_DIR,
+        None if a.no_playbook else Playbook(PLAYBOOK_PATH),
+        emit=printer,
+        mode=a.mode,
+        max_steps=a.max_steps,
+        headless=not a.headed,
+        vault=Vault.load(),
+        max_tokens_total=settings.max_tokens_total,
+        max_active_seconds=settings.max_active_seconds,
+    )
     r = agent.run(a.task)
     sys.exit(0 if r.status == "verified" else 1)
 
