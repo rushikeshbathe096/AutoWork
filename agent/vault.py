@@ -24,6 +24,7 @@ from typing import Any
 log = logging.getLogger("autowork.vault")
 ROOT = Path(__file__).resolve().parent.parent
 REDACTED = "[REDACTED]"
+_warned_demo = False
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,10 @@ def _vault_path() -> Path:
     own = ROOT / "config" / "vault.json"
     if own.exists():
         return own
-    log.warning("Using demo credentials from config/vault.example.json (simulated apps only)")
+    global _warned_demo
+    if not _warned_demo:
+        log.warning("Using demo credentials from config/vault.example.json (simulated apps only)")
+        _warned_demo = True
     return ROOT / "config" / "vault.example.json"
 
 

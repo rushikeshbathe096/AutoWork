@@ -37,3 +37,6 @@ testpaths = ["tests"]
 [tool.coverage.run]
 source = ["agent", "server", "simworld"]
 concurrency = ["greenlet", "thread"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "server", "simworld", "evals", "conftest"]

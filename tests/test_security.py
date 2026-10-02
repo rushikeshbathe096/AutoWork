@@ -9,7 +9,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-from conftest import PLAN, FakeLLM, W, admin_post, admin_state, make_agent
 from fastapi.testclient import TestClient
 
 from agent import policy
@@ -20,6 +19,7 @@ from agent.memory import Playbook
 from agent.netpolicy import AllowList, is_high_risk, normalize
 from agent.tools import ToolBox, WorkspaceError, confine
 from agent.vault import Vault
+from conftest import PLAN, FakeLLM, W, admin_post, admin_state, make_agent
 
 VAULT = Vault.load()
 SECRETS = VAULT.secret_values()

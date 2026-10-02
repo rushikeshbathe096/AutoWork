@@ -25,7 +25,8 @@ from agent.llm import LLMClient
 from agent.memory import Playbook
 from agent.vault import Vault
 
-from .tasks import TASKS
+from .report import categorize, is_honest, render
+from .tasks import TASKS, Failure, Task
 
 HERE = Path(__file__).parent
 
@@ -58,20 +59,29 @@ def main():
     ensure_world()
     pb_path = PLAYBOOK_PATH if a.playbook else HERE / ".eval_playbook.json"
     rows = []
-    for t in [t for t in TASKS if not a.only or t["id"] in a.only]:
+    rows = run_tasks([t for t in TASKS if not a.only or t.id in a.only], a, settings, pb_path)
+    (HERE / "results.json").write_text(json.dumps(rows, indent=2, default=str))
+    md = render(rows, settings.llm_model, time.strftime("%Y-%m-%d %H:%M"))
+    (HERE / "results.md").write_text(md)
+    print("\n" + md)
+
+
+def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_path: Path) -> list[dict]:
+    rows: list[dict] = []
+    for t in tasks:
         for rep in range(a.repeat):
             if not a.playbook:
                 pb_path.unlink(missing_ok=True)
             httpx.post(
-                f"{WORLD_URL}/admin/reset", json=t["faults"] or None, headers=admin_headers(), timeout=10
+                f"{WORLD_URL}/admin/reset", json=t.faults or None, headers=admin_headers(), timeout=10
             ).raise_for_status()
             reset_workspace()
-            human = ScriptedHuman(approve=t.get("approve", False), answers=t.get("answers"))
-            emit = (
-                (lambda k, d: None)
-                if a.quiet
-                else (lambda k, d, tid=t["id"]: print(f"  [{tid}] {k}: {json.dumps(d, default=str)[:160]}", flush=True))
-            )
+            human = ScriptedHuman(approve=t.approve, answers=t.answers)
+
+            def emit(k: str, d: dict, tid: str = t.id) -> None:
+                if not a.quiet:
+                    print(f"  [{tid}] {k}: {json.dumps(d, default=str)[:160]}", flush=True)
+
             agent = Agent(
                 LLMClient(settings),
                 human,
@@ -84,51 +94,40 @@ def main():
                 max_tokens_total=settings.max_tokens_total,
                 max_active_seconds=settings.max_active_seconds,
             )
-            print(f"\n=== {t['id']} (rep {rep + 1}) ===", flush=True)
-            report = agent.run(t["task"])
+            print(f"\n=== {t.id} (rep {rep + 1}) ===", flush=True)
+            report = agent.run(t.task)
             state = httpx.get(f"{WORLD_URL}/admin/state", headers=admin_headers(), timeout=10).json()
             try:
-                errs = t["check"](state, report, human, WORKSPACE)
-            except Exception as e:  # noqa: BLE001
-                errs = [f"check crashed: {e}"]
-            passed = not errs
-            # "honest" = the agent's self-assessment agrees with ground truth
-            honest = (report.status == "verified") == passed or t["id"] == "payment_needs_approval"
+                failures = t.check(state, report, human, WORKSPACE)
+            except Exception as e:  # noqa: BLE001 - a broken check must not abort the whole suite
+                failures = [Failure("missing", f"check crashed: {e}")]
+            passed = not failures
+            completed = t.completed(state) if t.completed else (passed and t.expect_verified)
             rows.append(
                 dict(
-                    task=t["id"],
+                    task=t.id,
                     rep=rep + 1,
                     passed=passed,
                     agent_status=report.status,
-                    honest=honest,
+                    honest=is_honest(report.status, completed),
+                    category=categorize([f.category for f in failures], report.status),
                     steps=report.steps,
                     seconds=report.duration_s,
-                    llm_calls=report.llm.get("calls"),
+                    llm_calls=report.llm.get("calls", 0),
                     tokens=report.llm.get("prompt_tokens", 0) + report.llm.get("completion_tokens", 0),
-                    errors=errs,
+                    failures=[str(f) for f in failures],
+                    info=t.info(state) if t.info else "",
                     run_id=report.run_id,
                     summary=report.summary,
                     human=human.log,
                 )
             )
-            print(f"--> {'PASS' if passed else 'FAIL'} agent={report.status} steps={report.steps} {errs}", flush=True)
-
-    (HERE / "results.json").write_text(json.dumps(rows, indent=2, default=str))
-    n = len(rows)
-    lines = [
-        f"# Eval results ({time.strftime('%Y-%m-%d %H:%M')}, model `{settings.llm_model}`)\n",
-        f"**Ground-truth pass rate: {sum(r['passed'] for r in rows)}/{n}** · "
-        f"self-assessment matches ground truth: {sum(r['honest'] for r in rows)}/{n}\n",
-        "| task | result | agent status | steps | time (s) | LLM calls | tokens | notes |",
-        "|---|---|---|---|---|---|---|---|",
-    ]
-    for r in rows:
-        lines.append(
-            f"| {r['task']} | {'✅' if r['passed'] else '❌'} | {r['agent_status']} | {r['steps']} | "
-            f"{r['seconds']} | {r['llm_calls']} | {r['tokens']} | {'; '.join(r['errors'])[:120]} |"
-        )
-    (HERE / "results.md").write_text("\n".join(lines) + "\n")
-    print("\n" + "\n".join(lines))
+            print(
+                f"--> {'PASS' if passed else 'FAIL'} agent={report.status} steps={report.steps} "
+                f"{[str(f) for f in failures]}",
+                flush=True,
+            )
+    return rows
 
 
 if __name__ == "__main__":

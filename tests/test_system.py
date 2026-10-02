@@ -6,12 +6,11 @@ compression, memory), not the model's intelligence. Run: .venv/bin/pytest -q
 
 from __future__ import annotations
 
-from conftest import LOGIN, PLAN, W, admin_post, admin_state, make_agent
-
 from agent import policy
 from agent.browser import Snapshot
 from agent.human import ScriptedHuman
 from agent.memory import Playbook
+from conftest import LOGIN, PLAN, W, admin_post, admin_state, make_agent
 
 
 def test_ambiguous_timeout_then_check_before_retry(tmp_path, ws):
