@@ -255,6 +255,72 @@ def test_retry_after_parses_groq_message():
     assert _retry_after(e) == pytest.approx(0.85)
 
 
+def test_retry_after_reads_long_waits_in_full():
+    # Regressions: Groq's "7h8m49.92s" was read as 49.92 s, and Gemini's retryDelay was not read at all,
+    # so the client kept retrying models that were blocked for hours.
+    groq = err(openai.RateLimitError, 429, "Limit 200000, Used 198501. Please try again in 7h8m49.92s. Need more")
+    assert _retry_after(groq) == pytest.approx(7 * 3600 + 8 * 60 + 49.92 + 0.5)
+    gemini = err(openai.RateLimitError, 429, "[{'error': {'details': [{'retryDelay': '46179s'}]}}]")
+    assert _retry_after(gemini) == pytest.approx(46179.5)
+
+
+def test_daily_quota_gives_up_immediately_instead_of_waiting():
+    c, waits = make([err(openai.RateLimitError, 429, "Please try again in 6h4m51.1s.")])
+    with pytest.raises(QuotaExhausted):
+        c.chat([{"role": "user", "content": "x"}])
+    assert waits == [] and c.quota_exhausted
+
+
+FALLBACK_ENV = {
+    "LLM_API_KEY": "groq",
+    "GEMINI_API_KEY": "g",
+    "NVIDIA_API_KEY": "n",
+    "OPENROUTER_API_KEY": "o",
+    "LLM_FALLBACK_MODELS": "gemini:gemini-3.5-flash, nvidia:nvidia/nemotron-3-super-120b-a12b,"
+    "openrouter:qwen/qwen3.8-27b:free",
+}
+
+
+def test_fallback_models_resolve_their_own_provider_and_key():
+    fbs = Settings.from_env(FALLBACK_ENV).llm_fallbacks
+    assert [(f.model, f.api_key) for f in fbs] == [
+        ("gemini:gemini-3.5-flash", "g"),
+        ("nvidia:nvidia/nemotron-3-super-120b-a12b", "n"),
+        ("openrouter:qwen/qwen3.8-27b:free", "o"),
+    ]
+    assert "openrouter.ai" in fbs[2].base_url
+    with pytest.raises(SettingsError, match="NVIDIA_API_KEY"):
+        Settings.from_env({**FALLBACK_ENV, "NVIDIA_API_KEY": ""})
+    assert Settings.from_env(FALLBACK_ENV).for_model("qwen/qwen3.8-27b", FALLBACK_ENV).llm_fallbacks == ()
+
+
+def test_out_of_quota_switches_to_next_fallback_and_stays_there():
+    s = Settings.from_env(FALLBACK_ENV)
+    daily = err(openai.RateLimitError, 429, "Please try again in 6h4m51.1s.")
+    down = err(openai.InternalServerError, 503, "high demand")
+    groq, gemini, nvidia, openrouter = (
+        FakeClient([daily]),
+        FakeClient([down] * 6),
+        FakeClient([ok_response(), ok_response()]),
+        FakeClient([]),
+    )
+    c = LLMClient(s, client=groq, sleep=lambda w: None, fallback_clients=[gemini, nvidia, openrouter])  # type: ignore[arg-type]
+    assert c.chat([{"role": "user", "content": "x"}]).content == "hi"
+    assert c.chat([{"role": "user", "content": "y"}]).content == "hi"
+    assert c.models_used == ["qwen/qwen3.8-27b", "gemini:gemini-3.5-flash", "nvidia:nvidia/nemotron-3-super-120b-a12b"]
+    assert nvidia.chat.completions.calls[0]["model"] == "nvidia/nemotron-3-super-120b-a12b"
+    assert len(nvidia.chat.completions.calls) == 2 and not c.quota_exhausted
+
+
+def test_quota_exhausted_only_when_every_fallback_is():
+    s = Settings.from_env({**FALLBACK_ENV, "LLM_FALLBACK_MODELS": "gemini:gemini-3.5-flash"})
+    daily = err(openai.RateLimitError, 429, "Please try again in 6h4m51.1s.")
+    c = LLMClient(s, client=FakeClient([daily]), sleep=lambda w: None, fallback_clients=[FakeClient([daily])])  # type: ignore[arg-type]
+    with pytest.raises(QuotaExhausted):
+        c.chat([{"role": "user", "content": "x"}])
+    assert c.quota_exhausted
+
+
 def test_missing_api_key_fails_clearly():
     with pytest.raises(LLMError, match="LLM_API_KEY"):
         LLMClient(Settings.from_env({}))

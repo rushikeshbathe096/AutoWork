@@ -80,7 +80,13 @@ class Verifier:
                         ),
                     }
                 ]
-                r = self.llm.chat(turn, tools=[VERDICT] if last else VERIFIER_TOOLS, require_tool=True)
+                r = self.llm.chat(
+                    turn,
+                    tools=[VERDICT] if last else VERIFIER_TOOLS,
+                    require_tool=True,
+                    role="verifier",
+                    step=step,
+                )
                 if not r.tool_calls:
                     msgs.append({"role": "user", "content": "Call a tool (verdict when done)."})
                     continue

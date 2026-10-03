@@ -37,7 +37,24 @@ class SettingsError(ValueError):
 # LLM_BASE_URL / LLM_API_KEY. Each provider has its own key and its own free-tier quota.
 PROVIDERS: dict[str, tuple[str, str]] = {
     "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY"),
+    "nvidia": ("https://integrate.api.nvidia.com/v1", "NVIDIA_API_KEY"),
+    "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),  # free models end in ":free"
 }
+
+
+def api_model_of(model: str) -> str:
+    """The model id the provider expects: without our "provider:" prefix."""
+    prefix, sep, rest = model.partition(":")
+    return rest if sep and prefix in PROVIDERS else model
+
+
+@dataclass(frozen=True)
+class Fallback:
+    """A model to switch to when the ones before it are out of quota or unavailable (LLM_FALLBACK_MODELS)."""
+
+    model: str
+    base_url: str
+    api_key: str
 
 
 @dataclass(frozen=True)
@@ -52,6 +69,7 @@ class Settings:
     max_steps: int
     max_tokens_total: int
     max_active_seconds: float
+    llm_fallbacks: tuple[Fallback, ...] = ()  # tried in order once the primary model can't serve us
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -83,12 +101,23 @@ class Settings:
         if mode not in MODES:
             errors.append(f"AUTOWORK_MODE={mode!r} must be one of {MODES}")
         api_key = e.get("LLM_API_KEY") or e.get("GROQ_API_KEY") or ""  # GROQ_API_KEY: fallback for the default
-        prefix, sep, rest = model.partition(":")
-        if sep and prefix in PROVIDERS:
-            base_url, key_var = PROVIDERS[prefix]
-            api_key = e.get(key_var, "")
-            if not api_key:
-                errors.append(f"LLM_MODEL={model!r} needs {key_var} in .env")
+        default_url, default_key = base_url, api_key
+
+        def resolve(m: str, var: str) -> tuple[str, str]:
+            prefix, sep, rest = m.partition(":")
+            if not (sep and prefix in PROVIDERS):
+                return default_url, default_key
+            url, key_var = PROVIDERS[prefix]
+            if not e.get(key_var):
+                errors.append(f"{var}={m!r} needs {key_var} in .env")
+            return url, e.get(key_var, "")
+
+        base_url, api_key = resolve(model, "LLM_MODEL")
+        fallbacks = tuple(
+            Fallback(m, *resolve(m, "LLM_FALLBACK_MODELS"))
+            for m in (x.strip() for x in e.get("LLM_FALLBACK_MODELS", "").split(","))
+            if m and m != model
+        )
         s = cls(
             llm_api_key=api_key,
             llm_base_url=base_url,
@@ -100,15 +129,18 @@ class Settings:
             max_steps=num("AUTOWORK_MAX_STEPS", "40", int, 1, 200),
             max_tokens_total=num("AUTOWORK_MAX_TOKENS", "400000", int, 1000, 10_000_000),
             max_active_seconds=num("AUTOWORK_MAX_ACTIVE_SECONDS", "1800", float, 10, 86_400),
+            llm_fallbacks=fallbacks,
         )
         if errors:
             raise SettingsError("Invalid configuration:\n  - " + "\n  - ".join(errors))
         return s
 
     def for_model(self, model: str, env: Mapping[str, str] | None = None) -> Settings:
-        """These settings with another model, resolving its provider prefix (key and base URL) the same way."""
+        """These settings with another model, resolving its provider prefix (key and base URL) the same way.
+        No fallbacks: the eval harness grades each model separately, so a run must not silently switch model."""
         e = dict(os.environ if env is None else env)
         e["LLM_MODEL"] = model
+        e.pop("LLM_FALLBACK_MODELS", None)
         return dataclasses.replace(
             Settings.from_env(e),
             **{k: getattr(self, k) for k in ("mode", "max_steps", "max_tokens_total", "max_active_seconds")},
@@ -117,8 +149,7 @@ class Settings:
     @property
     def api_model(self) -> str:
         """The model id the provider expects: without our "provider:" prefix."""
-        prefix, sep, rest = self.llm_model.partition(":")
-        return rest if sep and prefix in PROVIDERS else self.llm_model
+        return api_model_of(self.llm_model)
 
 
 def reset_workspace() -> None:

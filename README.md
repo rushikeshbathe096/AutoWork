@@ -9,7 +9,7 @@ It plans, then works in a **real Chromium browser** against **real web apps**: a
 
 Nothing in the agent is specific to invoices. The same loop, tools and prompts are used for every task in the eval suite: data entry, vendor-record updates, CSV bulk entry, read-only reporting, payment requests, phishing and prompt-injection traps.
 
-> **Status (honest):** Fully built, covered by 105 offline tests (83% line coverage), and **run against live LLMs since 2026-10-03**. The brief's example task completed **verified and correct in 2 of 2 runs** on `qwen/qwen3.8-27b`, graded against the ERP database. That is a small sample on one of the 11 tasks: the full suite is being run within Groq's free-tier quota (about 200k tokens per model per day, roughly 3 tasks). The first live runs found four real bugs that the offline tests could not; they are written up in [What the first live runs found](#what-the-first-live-runs-found). See [Evals](#evals).
+> **Status (honest):** Fully built, covered by 115 offline tests (83% line coverage), and **run against live LLMs since 2026-10-03**. The brief's example task completed **verified and correct in 2 of 2 runs** on `qwen/qwen3.8-27b`, graded against the ERP database. That is a small sample on one of the 11 tasks: the full suite is being run within Groq's free-tier quota (about 200k tokens per model per day, roughly 3 tasks). The first live runs found four real bugs that the offline tests could not; they are written up in [What the first live runs found](#what-the-first-live-runs-found). See [Evals](#evals).
 
 ---
 
@@ -21,6 +21,7 @@ Requirements: Python 3.12, Linux or macOS.
 git clone <this repo> && cd AutoWork
 make setup            # venv + pinned deps + Playwright Chromium + .env from the template
 # edit .env: set LLM_API_KEY (a Groq key works; any OpenAI-compatible provider does)
+#   optional: GEMINI_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY + LLM_FALLBACK_MODELS (see below)
 make run              # simulated company on :8001, AutoWork UI on :8000
 ```
 
@@ -106,10 +107,11 @@ Each one has a short ADR in [docs/decisions/](docs/decisions/).
 3. **Safety in code, not in the prompt** ([0003](docs/decisions/0003-policy-in-code.md)). A label gate *and* a network gate on every request, with approvals bound to the exact action and page state.
 4. **A separate, network-enforced read-only verifier** ([0004](docs/decisions/0004-separate-read-only-verifier.md)). A self-reported "done" isn't proof.
 5. **A simulated company with fault injection** ([0005](docs/decisions/0005-simulated-world-with-faults.md)). Real browser work, resettable state, and ground truth to grade against.
-6. **An OpenAI-compatible provider layer** ([0006](docs/decisions/0006-openai-compatible-provider.md)). Groq by default; switching providers is a `.env` change.
+6. **An OpenAI-compatible provider layer** ([0006](docs/decisions/0006-openai-compatible-provider.md)). Groq by default; switching providers is a `.env` change, and `LLM_FALLBACK_MODELS` chains providers so a run continues on the next one when a free tier runs out.
 
 ### Reliability mechanisms
 - **Transient failures** (an LLM 429 or 5xx, a click intercepted by an overlay) are retried automatically, honoring `Retry-After`.
+- **Provider fallback:** when the current model is out of quota (a daily limit, or rate-limit waits beyond 5 minutes) or keeps failing (6 server errors or timeouts in a row), the client switches to the next model in `LLM_FALLBACK_MODELS` and stays there for the rest of the run. Only when the last one is exhausted does the run stop as out of quota. The eval harness disables fallback, because results are graded per model.
 - **Informative failures** (HTTP 4xx/5xx, validation alerts) are surfaced prominently in the observation, so the model can work out the cause.
 - **Ambiguous writes** (a timeout after a submit) trigger the rule "check whether it took effect before retrying". The ERP's duplicate detection is a second safety net.
 - **Repetition:** the same tool and arguments on an unchanged page get a warning on the 3rd attempt and a question to the human on the 4th.
@@ -138,10 +140,10 @@ Every graded run is appended to `evals/history.jsonl` the moment it finishes, ta
 make evals ARGS="--model openai/gpt-oss-20b --only acme_invoice --repeat 4"
 make evals ARGS="--report"     # regenerate results.md from the history without running anything
 make evals ARGS="--models qwen/qwen3.8-27b,openai/gpt-oss-20b"   # rotate: next model when one runs out of quota
-make evals ARGS="--models qwen/qwen3.8-27b,gemini:gemini-3.8-flash"   # across providers (needs GEMINI_API_KEY)
+make evals ARGS="--models qwen/qwen3.8-27b,gemini:gemini-3.8-flash"   # across providers (needs GEMINI_API_KEY; see below)
 ```
 
-A `provider:` prefix selects another OpenAI-compatible provider for that model, with its own key from `.env` (currently `gemini:`, Google's OpenAI-compatible endpoint). Unprefixed models use `LLM_BASE_URL`.
+A `provider:` prefix selects another OpenAI-compatible provider for that model, with its own key from `.env` (currently `gemini:`, `nvidia:` for NVIDIA's API catalog and `openrouter:`, where free models end in `:free`). Unprefixed models use `LLM_BASE_URL`. Free tiers limit different things: Groq counts tokens (about 200k per model per day, roughly 3 tasks), while Gemini's free tier counts **requests: 20 per model per day**, fewer than the ~21 calls one task needs. So Gemini needs a paid key for full tasks.
 
 Free-tier throughput depends on tokens per run, so the harness records them. About 96% of a run's tokens are prompt, and about 60% of each prompt is fixed per run (system prompt, tool definitions, task brief). On Groq, prompt-cache hits don't count towards rate limits; on a real agent request to `gpt-oss-20b` 1,280 of 2,488 prompt tokens (51%) were cached. Groq caches only the gpt-oss models, so the report shows total tokens and the tokens that actually count against the quota. Tool descriptions no longer repeat guidance that the system prompt already gives (22% smaller, about 8% of each call).
 
@@ -198,11 +200,11 @@ The offline suite passed throughout; every one of these needed a real model to s
 The grader itself is tested (`tests/test_evals.py`): it is run against real world states changed through the ERP, including duplicates, lookalike filing, wrong amounts, payments and vendor tampering.
 
 ### Offline test suite
-`make test` runs 105 tests in about 20 seconds without an API key:
+`make test` runs 115 tests in about 20 seconds without an API key:
 - `test_security.py` (37): URL bypass attempts (encoding, redirects, page-JavaScript `fetch`, aliases, schemes), the network payment gate, approval binding and single use, secret redaction across events, reports and prompts, the admin token, control-plane CSRF and DNS rebinding, file confinement, budgets
-- `test_units.py` (42): policy edge cases, snapshot rendering, `parse_json`, LLM retries with a mocked SDK (including the rate-limit and empty-generation regressions from the live runs), settings validation, stuck detection, memory limits, context compression, redaction
+- `test_units.py` (50): policy edge cases, snapshot rendering, `parse_json`, LLM retries with a mocked SDK (including the rate-limit and empty-generation regressions from the live runs), provider fallback, settings validation, stuck detection, memory limits, context compression, redaction
 - `test_system.py` (8): full agent runs with a scripted LLM, covering the 504-after-save scenario, approval denial, verifier write-blocking, the auditor's forced verdict, loop escalation and context compression
-- `test_evals.py` (13): the grader, pass^k, and the history report (code versions, discarded runs, the playbook condition)
+- `test_evals.py` (15): the grader, pass^k, and the history report (code versions, discarded runs, the playbook condition)
 - `test_provenance.py` (5): date and amount normalization, and the invented-date regression, including laundering through `remember`
 
 Line coverage of `agent/`, `server/` and `simworld/` is 83% (`make cov`). The least-covered parts are `server/app.py` (run start and the live event stream) and `agent/cli.py`.
@@ -242,7 +244,7 @@ Line coverage of `agent/`, `server/` and `simworld/` is 83% (`make cov`). The le
 
 ## Models, APIs, frameworks and services used
 
-- **LLM:** any OpenAI-compatible chat-completions API with tool calling. The default is the Groq Cloud API with `qwen/qwen3.8-27b` (measured; `openai/gpt-oss-20b` also works, `openai/gpt-oss-120b` currently doesn't, see ADR 0006), configured through `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`. The LLM is used for planning, acting, auditing and playbook distillation.
+- **LLM:** any OpenAI-compatible chat-completions API with tool calling. The default is the Groq Cloud API with `qwen/qwen3.8-27b` (measured; `openai/gpt-oss-20b` also works, `openai/gpt-oss-120b` currently doesn't, see ADR 0006), configured through `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`. Optional fallbacks, tried in order when a quota runs out (set in `LLM_FALLBACK_MODELS`; each was checked to make tool calls on its free tier on 2026-10-04): Google Gemini API (`gemini-3.8-flash`, `gemini-3.5-flash`), NVIDIA API catalog (`nvidia/nemotron-3-super-120b-a12b`) and OpenRouter free models (`qwen/qwen3.8-27b:free`, `nvidia/nemotron-3-super-120b-a12b:free`). None of the fallbacks has been through the eval suite yet. The LLM is used for planning, acting, auditing and playbook distillation.
 - **Python 3.12**, **Playwright** (Chromium), **FastAPI**, **Uvicorn**, the **openai** Python SDK, **httpx**, **pydantic**, **python-dotenv**, **SQLite**. Versions are pinned in `requirements.txt` and `requirements.lock`.
 - **Dev tools:** pytest, pytest-cov, ruff, mypy, pip-audit. CI runs on GitHub Actions (`.github/workflows/ci.yml`).
 - **UI:** a single HTML file in vanilla JS with Server-Sent Events, with no front-end framework or build step.

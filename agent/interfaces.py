@@ -32,6 +32,9 @@ class LLM(Protocol):
         tools: list[dict] | None = None,
         require_tool: bool = False,
         json_mode: bool = False,
+        role: str = "worker",
+        step: int = 0,
+        **kw: Any,
     ) -> LLMResponse: ...
 
 

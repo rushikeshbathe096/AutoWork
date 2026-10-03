@@ -28,6 +28,7 @@ from .memory import Playbook, WorkingMemory
 from .provenance import Provenance
 from .stuck import ErrorStreak, RepetitionDetector, Signal
 from .tools import WORKER_TOOLS, ToolBox, ToolResult, tool_args_preview
+from .usage import UsageLogger
 from .vault import Redactor, Vault
 from .verifier import Claim, Verifier
 
@@ -119,6 +120,8 @@ class Agent:
         t0 = time.time()
         self._t0 = time.monotonic()
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        if hasattr(self.llm, "set_usage_logger"):
+            self.llm.set_usage_logger(UsageLogger(self.run_dir, self.run_id, self.redactor))
         log.info("run %s started (mode=%s, model=%s)", self.run_id, self.mode, self.llm.model)
         self.emit("start", {"run_id": self.run_id, "task": task, "mode": self.mode, "model": self.llm.model})
         self.browser = BrowserSession(
@@ -189,7 +192,12 @@ class Agent:
     def _plan(self, task: str) -> dict:
         sys = prompts.PLANNER.replace("{playbook}", self._playbook_block())
         try:
-            r = self.llm.chat([{"role": "system", "content": sys}, {"role": "user", "content": task}], json_mode=True)
+            r = self.llm.chat(
+                [{"role": "system", "content": sys}, {"role": "user", "content": task}],
+                json_mode=True,
+                role="planner",
+                step=0,
+            )
             plan = parse_json(r.content)
         except (LLMError, ValueError) as e:
             self.emit("warning", {"message": f"Planning failed ({e}); continuing without a plan"})
@@ -235,6 +243,8 @@ class Agent:
                 build_messages(system, self.brief, self.turns, status, self.keep_full),
                 tools=WORKER_TOOLS,
                 require_tool=True,
+                role="worker",
+                step=self.step,
             )
             if not resp.tool_calls:
                 self.emit("thought", {"step": self.step, "text": resp.content})
@@ -429,6 +439,8 @@ class Agent:
                     {"role": "user", "content": f"Task: {task}\n\nTrace:\n" + "\n".join(trace[-60:])},
                 ],
                 json_mode=True,
+                role="distiller",
+                step=self.step,
             )
             notes = parse_json(r.content).get("notes", [])[:5]
             self.playbook.add([n for n in notes if isinstance(n, str)], self.run_id)
