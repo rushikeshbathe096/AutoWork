@@ -6,6 +6,8 @@ compression, memory), not the model's intelligence. Run: .venv/bin/pytest -q
 
 from __future__ import annotations
 
+import json
+
 from agent import policy
 from agent.browser import Snapshot
 from agent.human import ScriptedHuman
@@ -47,7 +49,8 @@ def test_ambiguous_timeout_then_check_before_retry(tmp_path, ws):
     bills = [b for b in admin_state().json()["bills"] if b["invoice_number"] == "INV-2041"]
     assert len(bills) == 1 and bills[0]["amount_cents"] == 425000
     assert Playbook(tmp_path / "pb.json").load()[0]["note"].startswith("ERP login")
-    assert (tmp_path / "runs" / r.run_id / "report.json").exists()
+    saved = json.loads((tmp_path / "runs" / r.run_id / "report.json").read_text())
+    assert saved["llm"]["calls_by_model"] == {agent.llm.model: saved["llm"]["calls"]}  # credits the model that answered
 
 
 def test_payment_requires_approval_and_denial_is_respected(tmp_path, ws):

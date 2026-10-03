@@ -159,7 +159,7 @@ class BrowserSession:
         self._status: int | None = None
         self.page.on("response", self._on_response)
         if self.read_only:
-            # Verifier guarantee enforced at the network layer, not by prompt: no state-changing requests.
+            # Verifier read-only rule, enforced at the network layer, not by prompt: no non-GET/HEAD requests.
             self.page.route("**/*", self._read_only_route)
         self._shot_n = 0
         return self

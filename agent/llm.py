@@ -54,6 +54,11 @@ class QuotaExhausted(LLMError):
     token limit). An infrastructure condition, not agent behaviour: eval harnesses must not grade it."""
 
 
+class ProviderConfigError(LLMError):
+    """The provider refused us for a reason a retry or another model won't fix: bad key (401), no access (403),
+    unknown model or endpoint (404). Never triggers fallback, which would hide a broken setup."""
+
+
 class ProviderUnavailable(LLMError):
     """The provider kept failing (5xx, timeouts, connection errors) through every retry."""
 
@@ -81,7 +86,9 @@ class LLMClient:
             elif fb.api_key:
                 fallbacks.append((fb, self._make_client(fb.base_url, fb.api_key, s.llm_timeout_s)))
         self._fallbacks = fallbacks
-        self.models_used: list[str] = []
+        # Every model this client has used, in order, with the calls it answered (0 = switched away at once).
+        # The report needs it: after a fallback, the starting model is not the one that did the work.
+        self.calls_by_model: dict[str, int] = {}
         self._use(s.llm_model, client)
         self._sleep = sleep
         self.on_retry: Callable[[str], None] | None = None
@@ -103,7 +110,7 @@ class LLMClient:
         self.model = model  # as configured, e.g. "gemini:gemini-3.8-flash": used in reports
         self.api_model = api_model_of(model)  # as the provider expects it
         self.client = client
-        self.models_used.append(model)
+        self.calls_by_model.setdefault(model, 0)
         self._tool_choice_required_ok = True
         self._parallel_param_ok = True  # not every OpenAI-compatible endpoint accepts parallel_tool_calls
 
@@ -250,6 +257,12 @@ class LLMClient:
                 self._retry(f"provider error {type(e).__name__}, retrying in {wait}s")
                 self._sleep(wait)
                 continue
+            except (openai.AuthenticationError, openai.PermissionDeniedError, openai.NotFoundError) as e:
+                hint = {401: "check its API key", 403: "the key has no access to it", 404: "check the model name"}
+                raise ProviderConfigError(
+                    f"{self.model}: provider returned {e.status_code} ({hint.get(e.status_code, 'check the setup')})"
+                    f": {str(e)[:200]}"
+                ) from e
             except openai.BadRequestError as e:
                 latency_ms = round((time.monotonic() - t0_mono) * 1000, 1)
                 err_headers = dict(e.response.headers) if hasattr(e, "response") and e.response is not None else {}
@@ -311,6 +324,7 @@ class LLMClient:
 
             latency_ms = round((time.monotonic() - t0_mono) * 1000, 1)
             self.stats["calls"] += 1
+            self.calls_by_model[self.model] += 1
             if resp.usage:
                 self.stats["prompt_tokens"] += resp.usage.prompt_tokens or 0
                 self.stats["completion_tokens"] += resp.usage.completion_tokens or 0

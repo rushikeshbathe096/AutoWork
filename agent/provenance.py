@@ -1,4 +1,5 @@
-"""Value provenance: every value the agent types into a form must trace back to something it observed.
+"""Value provenance: every value the agent types into a form is checked against what it observed. An unsourced
+value is reported back to the model as a warning and a failed step (agent/tools.py); it is not blocked.
 
 WHY: in the first live eval the model left the portal page (which showed "Issued 01 Oct 2026"), the page was
 compressed out of its context, and when the ERP form asked for an invoice date it typed today's date. The

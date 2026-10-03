@@ -6,7 +6,8 @@ Reads runs/<run_id>/llm_usage.jsonl and reports:
 3. Every 429 event with the specific limit named in error body and rolling usage just before it.
 4. Average and max prompt size per role with section breakdown sorted largest first.
 5. Growth of prompt size across steps within a run (history accumulation analysis).
-6. One-paragraph verdict on binding limit, top 3 sections to shrink with token savings, and daily run capacity.
+6. Verdict on the binding limit, the largest prompt sections, and daily run capacity. Capacity is computed only
+   for a complete single-model run with a known daily limit: a crashed or cut-short run under-counts tokens.
 """
 
 from __future__ import annotations
@@ -167,6 +168,27 @@ def compute_rolling_usage(
                 tok = sum(s.get("tokens", 0) for s in secs.values())
             token_sum += tok
     return req_count, token_sum
+
+
+COMPLETE_STATUSES = {"verified", "unverified", "failed", "needs_user"}  # the agent reached its own finish decision
+
+
+def run_completeness(usage_path: Path, records: list[dict[str, Any]]) -> tuple[bool, str]:
+    """Whether this run's token totals describe a whole run. A run that crashed, hit a step/quota limit, or is
+    still going under-counts what a task costs, so capacity estimates from it would be wrong."""
+    report = usage_path.parent / "report.json"
+    if not report.is_file():
+        return False, "no report.json next to the usage log: the run was interrupted or is still running"
+    try:
+        r = json.loads(report.read_text())
+    except (OSError, ValueError) as e:
+        return False, f"report.json is unreadable ({e})"
+    status = r.get("status", "?")
+    if status not in COMPLETE_STATUSES:
+        return False, f"the run ended with status '{status}' ({str(r.get('summary', ''))[:160]})"
+    if records and not records[-1].get("success"):
+        return False, "the last LLM call in the log failed, so the log does not cover the whole run"
+    return True, f"status '{status}'"
 
 
 def analyze_run(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -576,55 +598,35 @@ def format_report(analysis: dict[str, Any]) -> str:
     elif analysis["header_rpm_limit"] and analysis["peak_rpm"] > analysis["header_rpm_limit"] * 0.8:
         is_rpm_binding = True
 
-    if is_tpm_binding or (not is_rpm_binding and not is_daily_binding):
+    # Only name a binding limit with evidence: a 429 that names it, or usage near a limit the provider reported.
+    if is_tpm_binding:
         binding_name = "Tokens Per Minute (TPM)"
         binding_reason = (
-            f"Peak TPM reached {analysis['peak_tpm']:,} tokens/min (header limit: {tpm_limit_str}), while RPM "
-            f"peaked at only {analysis['peak_rpm']} req/min (well below limit {rpm_limit_str}). Because each worker "
-            f"step sends ~{worker_bdown.get('avg_prompt_tokens', 0):.0f} tokens, "
-            "2 calls in rapid succession exceed Groq's limit."
+            f"Peak TPM {analysis['peak_tpm']:,} tokens/min (limit: {tpm_limit_str}); "
+            f"worker calls average ~{worker_bdown.get('avg_prompt_tokens', 0):.0f} prompt tokens."
         )
     elif is_rpm_binding:
         binding_name = "Requests Per Minute (RPM)"
         binding_reason = f"Peak RPM reached {analysis['peak_rpm']} req/min, hitting the provider request rate limit."
-    else:
+    elif is_daily_binding:
         binding_name = "Tokens Per Day (TPD)"
-        binding_reason = "Daily token budget was exhausted."
+        binding_reason = "A 429 named the daily token limit."
+    else:
+        binding_name = "none observed"
+        binding_reason = (
+            f"No 429s in this run, so no limit was hit (peak {analysis['peak_rpm']} req/min, "
+            f"{analysis['peak_tpm']:,} tokens/min; limits reported by the provider: "
+            f"RPM {rpm_limit_str}, TPM {tpm_limit_str})."
+        )
 
     verdict_lines.append(f"BINDING LIMIT: {binding_name}")
     verdict_lines.append(f"WHY: {binding_reason}")
     verdict_lines.append("")
-    verdict_lines.append("TOP 3 PROMPT SECTIONS TO SHRINK (Worker Role):")
-
-    top3 = [s for s in worker_secs if s["name"] != "other"][:3]
-    total_savings_est = 0
-    for rank, sec in enumerate(top3, 1):
-        avg_tok = sec["avg_tokens"]
-        # Potential savings: ~40-60% of section
-        savings = int(avg_tok * 0.5)
-        total_savings_est += savings
-        if sec["name"] == "tool_schemas":
-            rec = "Prune tool definitions or shorten verbose parameters/descriptions."
-        elif sec["name"] == "latest_observation_dom":
-            rec = "Reduce max interactive elements from 70 to 30 and omit empty attributes."
-        elif sec["name"] == "latest_observation_page_text":
-            rec = "Lower max text chars from 1,800 to 800 or summarize page text."
-        elif sec["name"] == "system_prompt":
-            rec = "Condense instructions into a concise checklist."
-        elif sec["name"] == "conversation_history":
-            rec = "Keep only 1 full observation instead of 2, or aggressively trim reasoning."
-        else:
-            rec = "Trim redundant formatting."
+    verdict_lines.append("LARGEST PROMPT SECTIONS (worker role, average per call):")
+    for rank, sec in enumerate([s for s in worker_secs if s["name"] != "other"][:3], 1):
         verdict_lines.append(
-            f"  {rank}. {sec['display']}: currently {avg_tok:.0f} tokens/call ({sec['pct']:.1f}% of prompt)."
+            f"  {rank}. {sec['display']}: {sec['avg_tokens']:.0f} tokens/call ({sec['pct']:.1f}% of prompt)."
         )
-        verdict_lines.append(f"     -> Estimated savings: ~{savings:,} tokens/call. {rec}")
-
-    verdict_lines.append(
-        f"\nCombined estimated savings: ~{total_savings_est:,} tokens saved PER CALL "
-        f"(reducing prompt from ~{worker_bdown.get('avg_prompt_tokens', 0):.0f} to "
-        f"~{max(0, worker_bdown.get('avg_prompt_tokens', 0) - total_savings_est):.0f} tokens)."
-    )
 
     lines.extend(verdict_lines)
     lines.append("")
@@ -634,16 +636,22 @@ def format_report(analysis: dict[str, Any]) -> str:
     lines.append(subbar)
     tokens_per_run = analysis["total_tokens"]
     calls_per_run = analysis["total_calls"]
-    lines.append(f"Measured per full run: {tokens_per_run:,} tokens across {calls_per_run} calls.")
-
-    daily_token_limit = analysis["header_tpd_limit"] or 200_000  # Groq free tier default for many models is 200k
-    runs_per_day = daily_token_limit / tokens_per_run if tokens_per_run > 0 else 0
-    source_label = "provider header limit" if analysis["header_tpd_limit"] else "estimated Groq free tier (200k TPD)"
-
-    lines.append(f"Daily Token Limit: {daily_token_limit:,} tokens ({source_label}).")
-    lines.append(
-        f"Run Capacity: ~{runs_per_day:.1f} full task runs fit into the daily quota before hitting rate limits."
-    )
+    complete, why = analysis.get("completeness", (False, "completeness unknown (no run directory)"))
+    lines.append(f"Measured in this run: {tokens_per_run:,} tokens across {calls_per_run} calls.")
+    if not complete:
+        lines.append(f"Run capacity NOT computed: this run is incomplete: {why}.")
+    elif len(analysis["models"]) != 1:
+        lines.append(
+            f"Run capacity NOT computed: the run used {len(analysis['models'])} models "
+            f"({', '.join(analysis['models'])}), each with its own quota."
+        )
+    elif not analysis["header_tpd_limit"] and analysis["providers"] != ["groq"]:
+        lines.append("Run capacity NOT computed: the provider sent no daily token limit and none is known for it.")
+    else:
+        daily = analysis["header_tpd_limit"] or 200_000
+        src = "provider header" if analysis["header_tpd_limit"] else "Groq free tier, 200k tokens/day per model"
+        lines.append(f"Daily token limit: {daily:,} ({src}).")
+        lines.append(f"Run capacity: ~{daily / tokens_per_run:.1f} runs like this one per day (n=1 run).")
     lines.append(bar)
 
     return "\n".join(lines)
@@ -686,6 +694,8 @@ def main() -> None:
     for fpath in target_files:
         records = parse_usage_file(fpath)
         analysis = analyze_run(records)
+        if analysis:
+            analysis["completeness"] = run_completeness(fpath, records)
         print(format_report(analysis))
 
 

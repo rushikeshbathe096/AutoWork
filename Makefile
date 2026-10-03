@@ -5,7 +5,7 @@ VENV ?= .venv
 
 setup:            ## create venv, install pinned deps + Chromium
 	python3 -m venv $(VENV)
-	$(VENV)/bin/pip install -r requirements-dev.txt
+	$(VENV)/bin/pip install -r requirements.lock -r requirements-dev.txt
 	$(PY) -m playwright install chromium
 	@test -f .env || (cp .env.example .env && echo "Created .env; add your LLM_API_KEY")
 

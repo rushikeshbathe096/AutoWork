@@ -23,7 +23,7 @@ from . import policy, prompts
 from .browser import ApprovalRequired, BrowserSession
 from .context import Turn, build_messages, note
 from .interfaces import LLM, Emit, Human
-from .llm import LLMError, parse_json
+from .llm import LLMError, ProviderConfigError, QuotaExhausted, parse_json
 from .memory import Playbook, WorkingMemory
 from .provenance import Provenance
 from .stuck import ErrorStreak, RepetitionDetector, Signal
@@ -93,7 +93,7 @@ class Agent:
     # ======================================================================= trace + budgets
     def emit(self, kind: str, data: dict) -> None:
         """Single exit point for the structured trace: redact secrets, persist to events.jsonl, forward.
-        WHY one place: every log line and UI message passes here, so redaction cannot be forgotten."""
+        WHY one place: every event (log line, UI message, events.jsonl) passes here, so it is redacted in one spot."""
         data = self.redactor.obj(data)
         self._seq += 1
         line = {"schema": SCHEMA_VERSION, "seq": self._seq, "t": round(time.time(), 2), "type": kind, "data": data}
@@ -132,6 +132,12 @@ class Agent:
         self.tools = ToolBox(self.browser, self.workspace, self.memory, self.vault, self.redactor, self.provenance)
         try:
             report = self._run(task)
+        except QuotaExhausted as e:  # the provider stopped serving us: an infrastructure stop, not a crash
+            log.warning("run %s stopped: LLM provider quota exhausted: %s", self.run_id, e)
+            self.emit("warning", {"message": f"LLM provider quota exhausted, stopping: {e}"})
+            report = self._report(
+                task, "budget_exhausted", f"Stopped: the LLM provider's quota is exhausted ({e}).", []
+            )
         except Exception as e:  # noqa: BLE001 - last line of defence: always return a report
             log.exception("run %s crashed", self.run_id)
             self.emit("error", {"message": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-1500:]})
@@ -140,6 +146,10 @@ class Agent:
             self.browser.close()
         report.duration_s = round(time.time() - t0, 1)
         report.llm = dict(self.llm.stats)
+        # Which model(s) actually answered; differs from the starting model after a provider fallback.
+        report.llm["calls_by_model"] = dict(
+            getattr(self.llm, "calls_by_model", None) or {self.llm.model: report.llm.get("calls", 0)}
+        )
         safe = self.redactor.obj(asdict(report))
         (self.run_dir / "report.json").write_text(json.dumps(safe, indent=2))
         self.emit("final", safe)
@@ -199,6 +209,8 @@ class Agent:
                 step=0,
             )
             plan = parse_json(r.content)
+        except (QuotaExhausted, ProviderConfigError):
+            raise  # no point planning on: every later call would fail the same way
         except (LLMError, ValueError) as e:
             self.emit("warning", {"message": f"Planning failed ({e}); continuing without a plan"})
             plan = {"goal": task, "success_criteria": [], "plan": [], "assumptions": [], "blocking_questions": []}

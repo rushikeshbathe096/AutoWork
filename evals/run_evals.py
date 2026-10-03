@@ -191,7 +191,9 @@ def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_p
                 human,
                 WORKSPACE,
                 RUNS_DIR,
-                Playbook(pb_path),
+                # Without --playbook, no playbook at all: no notes in the prompt and no distiller call after a
+                # verified run (it costs tokens, and a quota hit there would discard an already-finished run).
+                Playbook(pb_path) if a.playbook else None,
                 emit=emit,
                 mode=a.mode,
                 vault=Vault.load(),

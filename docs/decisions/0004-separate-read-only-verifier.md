@@ -15,6 +15,6 @@ After `finish(status=done)`, `agent/verifier.py` runs a second agent with a **fr
 
 ## Consequences
 + A separate signal the eval harness can score for honesty (claimed `verified` vs ground truth).
-+ The auditor cannot modify state; this is tested.
++ The auditor's browser can't send state-changing (non-GET/HEAD) requests other than vault logins; tested by `test_read_only_blocks_pay_even_with_login_in_query`. It can still follow GET links such as logout.
 − Extra LLM calls per run (typically a few).
 − Same underlying model as the worker → correlated errors are possible.

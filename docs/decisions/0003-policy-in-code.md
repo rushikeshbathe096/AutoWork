@@ -17,6 +17,6 @@ Approvals are bound to tool, args and page fingerprint and are single-use.
 - **Per-app action manifests**: the right production answer (documented in SECURITY.md), more than this prototype needs.
 
 ## Consequences
-+ The guarantee holds even if the model is fully compromised by prompt injection.
++ The gates hold whatever the model decides, including under prompt injection, for every action they classify as high-risk. They are keyword-based (labels and paths), so an unusually named payment endpoint would not be classified; see SECURITY.md, known gaps.
 + Testable: `tests/test_security.py` proves payments behind an innocuous label are still stopped.
 − Keyword lists can miss unusual endpoint names (`/settle`); see SECURITY.md known gaps.

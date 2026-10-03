@@ -13,10 +13,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            requirements.lock
+            requirements-dev.txt
       - name: Install dependencies
         run: |
-          python -m pip install -r requirements-dev.txt
+          python -m pip install -r requirements.lock -r requirements-dev.txt  # exact transitive pins + dev tools
           python -m playwright install --with-deps chromium
       - name: Lint
         run: |

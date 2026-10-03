@@ -7,7 +7,7 @@ from pathlib import Path
 
 from agent.usage import UsageLogger, analyze_sections, count_tokens, detect_provider, extract_rate_limit_headers
 from agent.vault import Redactor
-from evals.usage_report import analyze_run, format_report, parse_usage_file
+from evals.usage_report import analyze_run, format_report, parse_usage_file, run_completeness
 
 
 def test_token_counting_cl100k_base():
@@ -272,3 +272,48 @@ def test_usage_report_analysis_synthetic(tmp_path: Path):
     assert "RATE LIMIT 429 ERRORS" in report_text
     assert "Tokens Per Minute (TPM)" in report_text
     assert "DIAGNOSTIC VERDICT" in report_text
+    assert "savings" not in report_text.lower()  # no invented reduction estimates, only measured sizes
+    assert "1. Tool/Function Schemas: 1000 tokens/call" in report_text
+
+    # Capacity only for a run that finished on its own
+    def capacity_text(report: dict | None) -> str:
+        rp = tmp_path / "report.json"
+        rp.unlink(missing_ok=True)
+        if report is not None:
+            rp.write_text(json.dumps(report))
+        a = analyze_run(loaded)
+        a["completeness"] = run_completeness(log_file, loaded)
+        return format_report(a)
+
+    assert "no report.json" in capacity_text(None)
+    crashed = capacity_text({"status": "error", "summary": "The run crashed: KeyError"})
+    assert "Run capacity NOT computed" in crashed and "status 'error'" in crashed and "KeyError" in crashed
+    assert "status 'budget_exhausted'" in capacity_text({"status": "budget_exhausted", "summary": "step limit"})
+    done = capacity_text({"status": "verified", "summary": "ok"})
+    assert "Run capacity: ~28.3 runs like this one per day" in done  # 200,000 / 7,070 tokens
+
+
+def test_capacity_refused_for_multi_model_or_unknown_quota(tmp_path: Path):
+    log_file = tmp_path / "llm_usage.jsonl"
+    (tmp_path / "report.json").write_text(json.dumps({"status": "verified"}))
+    rec = {
+        "timestamp_wall": 1.0,
+        "step": 1,
+        "run_id": "r",
+        "role": "worker",
+        "success": True,
+        "prompt_tokens": 10,
+        "completion_tokens": 1,
+        "sections": {},
+    }
+    rows = [
+        {**rec, "model": "qwen/qwen3.8-27b", "provider": "groq"},
+        {**rec, "model": "nvidia:x", "provider": "nvidia"},
+    ]
+    log_file.write_text("\n".join(json.dumps(r) for r in rows))
+    a = analyze_run(parse_usage_file(log_file))
+    a["completeness"] = run_completeness(log_file, rows)
+    assert "the run used 2 models" in format_report(a)
+    a = analyze_run(rows[1:])
+    a["completeness"] = run_completeness(log_file, rows[1:])
+    assert "no daily token limit" in format_report(a)

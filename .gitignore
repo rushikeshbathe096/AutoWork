@@ -12,3 +12,4 @@ config/vault.json
 .ruff_cache/
 INTERVIEW_NOTES.md
 implementation.md
+DEMO_SCRIPT.md

@@ -40,13 +40,15 @@ Everything below marked ✅ is implemented and covered by a test in `tests/test_
 - ✅ `/admin/*` in the simulated world also requires an `X-Admin-Token` header (`simworld/app.py:require_admin`). That token is used only by the eval harness and the world-reset endpoint, never by the agent. This is defense in depth: the agent's browser blocks `/admin` anyway.
 - ✅ **File tools** are confined to the workspace using resolved real paths and `Path.is_relative_to`, which handles symlinks, `..` and absolute paths. Reads are capped at 200 KB per file (8,000 characters shown to the model) and writes at 100 KB (`agent/tools.py:confine`).
 
-### The verifier cannot change anything
+### The verifier can't change business data
 - ✅ The auditor's page aborts every request that isn't GET or HEAD, except POSTs to the **exact** login paths from the vault (`BrowserSession._read_only_route`). Test: `test_read_only_blocks_pay_even_with_login_in_query`.
+- This relies on the apps not changing data on GET. In the simulated apps the only state-changing GETs are `/acme/logout` and `/erp/logout`, which end a session; the auditor shares the worker's browser context, so it could log the worker out, but it can't change records.
 
-### Credentials never reach the model or the logs
+### Credentials are kept out of prompts and logs
 - ✅ Credentials live in a vault (`agent/vault.py`). The source is `config/vault.json` (git-ignored), `AUTOWORK_VAULT_FILE`, or the demo `config/vault.example.json` for the simulated apps.
 - ✅ The model calls `login(site)`, and the browser fills the form itself. Nothing in the workspace contains passwords.
 - ✅ `Redactor` scrubs known secret values from every event (`Agent.emit` is the single exit point), from `report.json`, and from every tool observation before it enters a prompt. Test: `test_no_secret_in_events_reports_or_prompts`, which logs into both sites and then searches `events.jsonl`, `report.json` and all prompts.
+- Limits: redaction matches the vault's exact values only (see Known gaps), and screenshots are stored unredacted (password inputs are masked by the browser). The usage log (`llm_usage.jsonl`) stores sizes, not prompt content, and passes error bodies through the same `Redactor`; it is not covered by the test above.
 
 ### The control plane only obeys its own UI
 - ✅ Both servers bind to `127.0.0.1` (`run.py`).
@@ -55,17 +57,20 @@ Everything below marked ✅ is implemented and covered by a test in `tests/test_
 - ✅ A foreign `Origin` header is rejected even when the token is present.
 - ✅ Request bodies are validated (mode, step and fault ranges), run ids are validated before they are used in file paths, and `/files` can't traverse outside `runs/` (Starlette `StaticFiles`; regression-tested).
 
+### Invented values are flagged, not blocked
+- ✅ After every form fill, each value is checked against the user's task and everything observed this run (`agent/provenance.py`, `agent/tools.py:_t_browser_fill`). An unsourced value produces an `UNSOURCED VALUES` warning to the model and a failed step (counted by the error-streak escalation). **The value is not removed and the save is not blocked.** The agent's own notes and read-backs are not sources, so a guess can't be laundered through memory. Tests: `tests/test_provenance.py` (not part of the 37 security tests).
+
 ### Untrusted content is labelled, and the UI cannot be scripted by it
 - ✅ Page text, emails and files reach the model inside `<<<UNTRUSTED_…>>>` blocks. The closing delimiter is neutralized inside the content, so a page can't fake the end of the block. The worker and verifier prompts say that instructions inside these blocks must never be followed.
   - **This is a mitigation, not a boundary.** A model can still be persuaded. The real defense is that the dangerous outcomes (payments, data changes outside the allowlist) are blocked by the code above, whatever the model decides.
 - ✅ The UI (`server/static/index.html`) inserts all untrusted text with `textContent`. There is no `innerHTML` anywhere.
 
 ### Resource limits
-- ✅ Per LLM call: a timeout (`LLM_TIMEOUT_S`, default 90 s), at most 2,048 output tokens, and at most 6 attempts.
+- ✅ Per LLM call: a timeout (`LLM_TIMEOUT_S`, default 90 s), an output budget (`LLM_MAX_OUTPUT_TOKENS`, default 4,096; doubled up to 32,768 only when a reasoning model used it all before writing its tool call), at most 6 attempts for failures, and at most 5 minutes of waiting on rate limits.
 - ✅ Per run: a step limit (`AUTOWORK_MAX_STEPS`, default 40), a token budget (`AUTOWORK_MAX_TOKENS`, default 400k) and an active wall-clock budget (`AUTOWORK_MAX_ACTIVE_SECONDS`, default 1800 s, excluding time spent waiting for a human). The auditor has at most 10 steps, and a human question times out after 15 minutes, defaulting to the safe answer (deny or stop).
 
 ### Supply chain
-- ✅ Runtime dependencies are pinned in `requirements.txt`, and the full transitive set in `requirements.lock`, generated from a clean venv. At the time of pinning, `pip-audit` reported **no known vulnerabilities** across the installed environment. `make audit` re-runs it.
+- ✅ Runtime dependencies are pinned in `requirements.txt`, and the full transitive set in `requirements.lock`, generated from a clean venv. `make audit` runs `pip-audit` over the installed environment. On 2026-10-04 it reported no known vulnerabilities in any project dependency, and 12 in `pip` 24.0 itself (the venv's installer, not imported by AutoWork; fixed in pip 26.2). CI installs from `requirements.lock`.
 
 ## Known gaps (not implemented)
 

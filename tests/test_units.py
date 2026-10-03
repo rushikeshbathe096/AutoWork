@@ -307,7 +307,11 @@ def test_out_of_quota_switches_to_next_fallback_and_stays_there():
     c = LLMClient(s, client=groq, sleep=lambda w: None, fallback_clients=[gemini, nvidia, openrouter])  # type: ignore[arg-type]
     assert c.chat([{"role": "user", "content": "x"}]).content == "hi"
     assert c.chat([{"role": "user", "content": "y"}]).content == "hi"
-    assert c.models_used == ["qwen/qwen3.8-27b", "gemini:gemini-3.5-flash", "nvidia:nvidia/nemotron-3-super-120b-a12b"]
+    assert c.calls_by_model == {
+        "qwen/qwen3.8-27b": 0,
+        "gemini:gemini-3.5-flash": 0,
+        "nvidia:nvidia/nemotron-3-super-120b-a12b": 2,
+    }
     assert nvidia.chat.completions.calls[0]["model"] == "nvidia/nemotron-3-super-120b-a12b"
     assert len(nvidia.chat.completions.calls) == 2 and not c.quota_exhausted
 
@@ -407,3 +411,23 @@ def test_redactor_handles_nested_structures():
     r = Redactor(["hunter22", "s3cret"])
     out = r.obj({"a": ["pw hunter22", {"b": "s3cret!"}], "n": 3})
     assert out == {"a": [f"pw {REDACTED}", {"b": f"{REDACTED}!"}], "n": 3}
+
+
+@pytest.mark.parametrize(
+    "cls,status,hint",
+    [
+        (openai.AuthenticationError, 401, "API key"),
+        (openai.PermissionDeniedError, 403, "no access"),
+        (openai.NotFoundError, 404, "model name"),
+    ],
+)
+def test_config_errors_raise_clearly_and_never_fall_back(cls, status, hint):
+    from agent.llm import ProviderConfigError
+
+    s = Settings.from_env(FALLBACK_ENV)
+    primary, fallback = FakeClient([err(cls, status, "invalid")]), FakeClient([ok_response()])
+    c = LLMClient(s, client=primary, sleep=lambda w: None, fallback_clients=[fallback, FakeClient([]), FakeClient([])])  # type: ignore[arg-type]
+    with pytest.raises(ProviderConfigError, match=f"qwen/qwen3.8-27b: provider returned {status}.*{hint}"):
+        c.chat([{"role": "user", "content": "x"}])
+    assert len(primary.chat.completions.calls) == 1 and fallback.chat.completions.calls == []  # no retry, no switch
+    assert c.model == "qwen/qwen3.8-27b" and not c.quota_exhausted

@@ -1,5 +1,5 @@
-# Runtime dependencies, pinned (verified with pip-audit: no known vulnerabilities at time of pinning).
-# Full transitive lock: requirements.lock
+# Runtime dependencies, pinned. pip-audit on 2026-10-04: no known vulnerabilities in these or their dependencies.
+# Full transitive lock: requirements.lock (CI installs from it)
 fastapi==0.142.2
 uvicorn[standard]==0.54.0
 playwright==1.63.0

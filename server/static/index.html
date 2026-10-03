@@ -48,7 +48,7 @@ button:disabled{opacity:.5;cursor:default}
     <textarea id="task" placeholder="Describe what you need done…">Find the latest invoice from Acme, extract the amount and due date, enter it into our ERP, and tell me once it is done.</textarea>
     <div class="row"><label>Mode</label><select id="mode"><option value="balanced">balanced: approve irreversible actions</option><option value="supervised">supervised: approve every data change</option><option value="autonomous">autonomous: no approvals</option></select></div>
     <div class="row"><input type="checkbox" id="reset" checked><label for="reset">Reset simulated world first</label></div>
-    <div class="row"><input type="checkbox" id="pb" checked><label for="pb">Use learned playbook</label></div>
+    <div class="row"><input type="checkbox" id="pb"><label for="pb">Use learned playbook</label></div>
     <h2 style="margin-top:12px">Inject faults</h2>
     <div class="row"><input type="checkbox" id="f1"><label for="f1">Vendor portal login fails once (503)</label></div>
     <div class="row"><input type="checkbox" id="f2"><label for="f2">ERP save times out (504) but saves</label></div>

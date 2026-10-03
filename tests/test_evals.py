@@ -230,3 +230,97 @@ def test_models_rotation_moves_on_when_a_model_runs_out_of_quota(monkeypatch, tm
     re_.main()
     assert ran[0] == ("m1", ["acme_invoice", "globex_eu_formats"])  # quota stop on m1 ...
     assert ran[1] == ("m2", ["globex_eu_formats"])  # ... m2 continues, skipping what it already has (implied --resume)
+
+
+def test_quota_429_in_an_eval_is_discarded_not_graded_or_crashed(monkeypatch, tmp_path):
+    """Evals run without fallbacks: a 429 asking for a wait beyond the threshold must stop the run cleanly
+    (no crash report) and be recorded as discarded, then stop the suite for that model."""
+    import shutil
+
+    import openai
+    from test_units import FakeClient, err
+
+    from agent.config import ROOT, Settings
+    from agent.llm import LLMClient
+    from evals import run_evals as re_
+
+    env = {"LLM_API_KEY": "k", "GEMINI_API_KEY": "g", "LLM_FALLBACK_MODELS": "gemini:gemini-3.5-flash"}
+    settings = Settings.from_env(env).for_model("qwen/qwen3.8-27b", env)
+    assert settings.llm_fallbacks == ()  # evals never switch model
+    quota = err(openai.RateLimitError, 429, "Rate limit reached. Please try again in 7h8m49.92s.")
+    clients: list[LLMClient] = []
+
+    def fake_client(s):
+        clients.append(LLMClient(s, client=FakeClient([quota]), sleep=lambda w: None))  # type: ignore[arg-type]
+        return clients[-1]
+
+    ws = tmp_path / "ws"
+    monkeypatch.setattr(re_, "LLMClient", fake_client)
+    monkeypatch.setattr(re_, "HISTORY", tmp_path / "h.jsonl")
+    monkeypatch.setattr(re_, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(re_, "WORKSPACE", ws)
+    monkeypatch.setattr(
+        re_, "reset_workspace", lambda: shutil.copytree(ROOT / "workspace_seed", ws, dirs_exist_ok=True)
+    )
+    a = NS(playbook=False, quiet=True, repeat=1, mode="balanced", repeat_needed={})
+    with pytest.raises(re_.QuotaStop):
+        re_.run_tasks([TASK["acme_invoice"]], a, settings, tmp_path / "pb.json")
+    rows = [json.loads(line) for line in re_.HISTORY.read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["discarded"] is True and "passed" not in rows[0]
+    report = json.loads((tmp_path / "runs" / rows[0]["run_id"] / "report.json").read_text())
+    assert report["status"] == "budget_exhausted" and "quota" in report["summary"]
+    assert "crashed" not in report["summary"]
+    assert len(clients[0].client.chat.completions.calls) == 1  # stopped at the planner: no further calls
+
+
+def test_eval_without_playbook_never_calls_the_distiller(monkeypatch, tmp_path):
+    """A verified eval run with the playbook off must make zero distiller calls (no learning, no extra tokens)."""
+    import shutil
+
+    from agent.config import ROOT, Settings
+    from conftest import LOGIN, PLAN, FakeLLM
+    from evals import run_evals as re_
+
+    script = [
+        PLAN,
+        *LOGIN,
+        (
+            "browser_fill",
+            {
+                "fields": [
+                    {"element_id": 6, "value": "Acme Supplies Inc."},
+                    {"element_id": 7, "value": "INV-2041"},
+                    {"element_id": 8, "value": "4250.00"},
+                    {"element_id": 10, "value": "2026-10-01"},
+                    {"element_id": 11, "value": "2026-10-31"},
+                ]
+            },
+        ),
+        ("browser_click", {"element_id": 13}),
+        ("finish", {"status": "done", "summary": "Entered INV-2041", "evidence": ["saved"]}),
+        ("browser_goto", {"url": W + "/erp/bills?q=INV-2041"}),
+        ("verdict", {"passed": True, "reason": "bill INV-2041 exists", "evidence": ["bills list"]}),
+        {"notes": ["must not be requested"]},  # what a distiller call would consume
+    ]
+    roles: list[str] = []
+
+    class SpyLLM(FakeLLM):
+        quota_exhausted = False
+
+        def chat(self, messages, tools=None, require_tool=False, json_mode=False, **kw):
+            roles.append(kw.get("role", "?"))
+            return super().chat(messages, tools, require_tool, json_mode, **kw)
+
+    ws = tmp_path / "ws"
+    monkeypatch.setattr(re_, "LLMClient", lambda s: SpyLLM(script))
+    monkeypatch.setattr(re_, "HISTORY", tmp_path / "h.jsonl")
+    monkeypatch.setattr(re_, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(re_, "WORKSPACE", ws)
+    monkeypatch.setattr(
+        re_, "reset_workspace", lambda: shutil.copytree(ROOT / "workspace_seed", ws, dirs_exist_ok=True)
+    )
+    a = NS(playbook=False, quiet=True, repeat=1, mode="balanced", repeat_needed={})
+    rows = re_.run_tasks([TASK["acme_invoice"]], a, Settings.from_env({"LLM_API_KEY": "k"}), tmp_path / "pb.json")
+    assert rows[0]["agent_status"] == "verified"
+    assert "distiller" not in roles and "planner" in roles and "verifier" in roles
+    assert not (tmp_path / "pb.json").exists()
