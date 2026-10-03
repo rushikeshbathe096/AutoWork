@@ -77,6 +77,11 @@ def pass_hat_k(rows: list[dict], k: int) -> float | None:
     return mean(est) if est else None
 
 
+def quota_tokens(r: dict) -> int:
+    """Tokens that count against the provider's rate limits: Groq doesn't count prompt-cache hits."""
+    return r["tokens"] - r.get("cached_tokens", 0)
+
+
 def render_history(history: list[dict], when: str, ks: tuple[int, ...] = (1, 2, 4, 8)) -> str:
     """Report over the append-only run history, one section per model and condition. Only runs from each
     group's most recent code version are aggregated: runs made before a fix measured different code.
@@ -95,11 +100,12 @@ def render_history(history: list[dict], when: str, ks: tuple[int, ...] = (1, 2, 
         "probability that k repeated trials of a task **all** succeed, estimated per task as C(c,k)/C(n,k) from n "
         "trials with c successes and averaged over tasks with at least k trials (`-`: too few trials). Small "
         "samples: read every number together with its run count. Each row uses only runs of its latest code "
-        "version. Discarded runs hit the provider's quota (free tier) and were not graded.\n",
+        "version. Discarded runs hit the provider's quota (free tier) and were not graded. Quota tokens exclude "
+        "prompt-cache hits, which Groq does not count towards rate limits (older runs count everything).\n",
         "| model | code version | graded runs | tasks | "
         + " | ".join(f"pass^{k}" for k in ks)
-        + " | honesty | avg tokens | discarded |",
-        "|---|---|---|---|" + "---|" * len(ks) + "---|---|---|",
+        + " | honesty | avg tokens | avg quota tokens | discarded |",
+        "|---|---|---|---|" + "---|" * len(ks) + "---|---|---|---|",
     ]
     sections = []
     for label, rs in sorted(groups.items()):
@@ -113,6 +119,8 @@ def render_history(history: list[dict], when: str, ks: tuple[int, ...] = (1, 2, 
             + " | ".join("-" if v is None else f"{v:.2f}" for v in pk)
             + f" | {sum(r['honest'] for r in cur)}/{len(cur)} | "
             + (f"{mean(r['tokens'] for r in cur):,.0f}" if cur else "-")
+            + " | "
+            + (f"{mean(quota_tokens(r) for r in cur):,.0f}" if cur else "-")
             + f" | {sum(dropped.values())} |"
         )
         older = len(rs) - len(same)

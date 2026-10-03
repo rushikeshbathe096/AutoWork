@@ -60,7 +60,8 @@ class LLMClient:
     ):
         """`client` and `sleep` are injectable so retry behaviour can be unit-tested without network or waiting."""
         s = settings or Settings.from_env()
-        self.model = s.llm_model
+        self.model = s.llm_model  # as configured, e.g. "gemini:gemini-3.8-flash": used in reports
+        self.api_model = s.api_model  # as the provider expects it
         self.max_output_tokens, self.reasoning_effort = s.llm_max_output_tokens, s.llm_reasoning_effort
         if client is None:
             if not s.llm_api_key:
@@ -72,9 +73,12 @@ class LLMClient:
         self.client = client
         self._sleep = sleep
         self.on_retry: Callable[[str], None] | None = None
-        self.stats = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "retries": 0}
+        # cached_tokens: the part of prompt_tokens served from the provider's prompt cache. On Groq it doesn't
+        # count towards rate limits, so free-tier throughput depends on it (measured ~51% on gpt-oss).
+        self.stats = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0, "retries": 0}
         self.quota_exhausted = False  # set when a call gave up on rate limits; the agent turns errors into reports
         self._tool_choice_required_ok = True
+        self._parallel_param_ok = True  # not every OpenAI-compatible endpoint accepts parallel_tool_calls
 
     def chat(
         self,
@@ -93,13 +97,14 @@ class LLMClient:
         attempt, rate_hits, rate_waited = 0, 0, 0.0
         out_tokens, effort = self.max_output_tokens, self.reasoning_effort
         while attempt < max_attempts:
-            kwargs: dict = dict(model=self.model, messages=msgs, temperature=temperature, max_tokens=out_tokens)
+            kwargs: dict = dict(model=self.api_model, messages=msgs, temperature=temperature, max_tokens=out_tokens)
             if effort:
                 kwargs["reasoning_effort"] = effort
             if tools:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "required" if (require_tool and self._tool_choice_required_ok) else "auto"
-                kwargs["parallel_tool_calls"] = False
+                if self._parallel_param_ok:
+                    kwargs["parallel_tool_calls"] = False
             if json_mode:
                 kwargs["response_format"] = {"type": "json_object"}
             try:
@@ -145,6 +150,10 @@ class LLMClient:
                         }
                     ]
                     continue
+                if "parallel_tool_calls" in body and self._parallel_param_ok:
+                    self._parallel_param_ok = False  # the agent loop already executes only the first call
+                    self._retry("provider rejected parallel_tool_calls; retrying without it")
+                    continue
                 if "tool_choice" in body and self._tool_choice_required_ok:
                     self._tool_choice_required_ok = False
                     self._retry("provider rejected tool_choice=required; falling back to auto")
@@ -159,6 +168,8 @@ class LLMClient:
             if resp.usage:
                 self.stats["prompt_tokens"] += resp.usage.prompt_tokens or 0
                 self.stats["completion_tokens"] += resp.usage.completion_tokens or 0
+                details = getattr(resp.usage, "prompt_tokens_details", None)
+                self.stats["cached_tokens"] += getattr(details, "cached_tokens", None) or 0
             msg = resp.choices[0].message
             calls = []
             for tc in msg.tool_calls or []:

@@ -6,6 +6,7 @@ message, not surface 20 minutes into a run as an obscure TypeError.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import shutil
 from collections.abc import Mapping
@@ -29,6 +30,14 @@ MODES = ("autonomous", "balanced", "supervised")
 
 class SettingsError(ValueError):
     pass
+
+
+# Extra OpenAI-compatible providers, selected per model with a "provider:" prefix (e.g. gemini:gemini-3.8-flash).
+# A colon, because provider model names already contain slashes (qwen/qwen3.8-27b). Unprefixed models use
+# LLM_BASE_URL / LLM_API_KEY. Each provider has its own key and its own free-tier quota.
+PROVIDERS: dict[str, tuple[str, str]] = {
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY"),
+}
 
 
 @dataclass(frozen=True)
@@ -73,9 +82,15 @@ class Settings:
         mode = e.get("AUTOWORK_MODE", "balanced")
         if mode not in MODES:
             errors.append(f"AUTOWORK_MODE={mode!r} must be one of {MODES}")
+        api_key = e.get("LLM_API_KEY") or e.get("GROQ_API_KEY") or ""  # GROQ_API_KEY: fallback for the default
+        prefix, sep, rest = model.partition(":")
+        if sep and prefix in PROVIDERS:
+            base_url, key_var = PROVIDERS[prefix]
+            api_key = e.get(key_var, "")
+            if not api_key:
+                errors.append(f"LLM_MODEL={model!r} needs {key_var} in .env")
         s = cls(
-            # LLM_API_KEY is provider-neutral; GROQ_API_KEY kept as a fallback for the default provider
-            llm_api_key=e.get("LLM_API_KEY") or e.get("GROQ_API_KEY") or "",
+            llm_api_key=api_key,
             llm_base_url=base_url,
             llm_model=model,
             llm_timeout_s=num("LLM_TIMEOUT_S", "90", float, 1, 600),
@@ -89,6 +104,21 @@ class Settings:
         if errors:
             raise SettingsError("Invalid configuration:\n  - " + "\n  - ".join(errors))
         return s
+
+    def for_model(self, model: str, env: Mapping[str, str] | None = None) -> Settings:
+        """These settings with another model, resolving its provider prefix (key and base URL) the same way."""
+        e = dict(os.environ if env is None else env)
+        e["LLM_MODEL"] = model
+        return dataclasses.replace(
+            Settings.from_env(e),
+            **{k: getattr(self, k) for k in ("mode", "max_steps", "max_tokens_total", "max_active_seconds")},
+        )
+
+    @property
+    def api_model(self) -> str:
+        """The model id the provider expects: without our "provider:" prefix."""
+        prefix, sep, rest = self.llm_model.partition(":")
+        return rest if sep and prefix in PROVIDERS else self.llm_model
 
 
 def reset_workspace() -> None:

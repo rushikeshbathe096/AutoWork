@@ -11,3 +11,4 @@ config/vault.json
 .mypy_cache/
 .ruff_cache/
 INTERVIEW_NOTES.md
+implementation.md

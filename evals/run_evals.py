@@ -5,6 +5,7 @@
   .venv/bin/python -m evals.run_evals --playbook      # let lessons accumulate across tasks
   .venv/bin/python -m evals.run_evals --model openai/gpt-oss-20b --repeat 2   # override LLM_MODEL
   .venv/bin/python -m evals.run_evals --report        # only regenerate results.md from the history
+  .venv/bin/python -m evals.run_evals --models qwen/qwen3.8-27b,openai/gpt-oss-20b  # rotate (implies --resume)
 
 Starts the simulated world itself if it isn't running. Every graded run is appended to evals/history.jsonl as
 soon as it finishes (tagged with model and code version), and evals/results.md is regenerated from the whole
@@ -15,7 +16,6 @@ If the provider's quota runs out mid-suite, that run is discarded (not the agent
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import hashlib
 import json
 import shutil
@@ -115,40 +115,57 @@ def main():
         help="skip tasks that already have --repeat graded runs for this model, code version and condition "
         "(rerun the same command daily to finish a suite within free-tier quotas)",
     )
+    ap.add_argument(
+        "--models",
+        help="comma-separated models to rotate through (implies --resume): each runs its remaining tasks until "
+        "its quota runs out, then the next model takes over. Results stay per model.",
+    )
     a = ap.parse_args()
     if a.report:
         print(write_report())
         return
-    settings = Settings.from_env()
-    if a.model:
-        settings = dataclasses.replace(settings, llm_model=a.model)
+    base = Settings.from_env()
+    models = [m.strip() for m in a.models.split(",") if m.strip()] if a.models else [a.model or base.llm_model]
+    a.resume = a.resume or bool(a.models)
     unknown = set(a.only or []) - {t.id for t in TASKS}
     if unknown:
         raise SystemExit(f"unknown task id(s): {sorted(unknown)}")
     ensure_world()
     pb_path = PLAYBOOK_PATH if a.playbook else HERE / ".eval_playbook.json"
-    tasks = [t for t in TASKS if not a.only or t.id in a.only]
-    if a.resume:
-        version = code_version()
-        graded = Counter(
-            r["task"]
-            for r in load_history()
-            if r.get("model") == settings.llm_model
-            and r.get("code") == version
-            and bool(r.get("playbook")) == a.playbook
-            and not r.get("discarded")
-        )
-        done = [t.id for t in tasks if graded[t.id] >= a.repeat]
-        tasks = [t for t in tasks if graded[t.id] < a.repeat]
-        print(
-            f"--resume: {len(done)} task(s) already done for this version, {len(tasks)} to go: {[t.id for t in tasks]}"
-        )
-        a.repeat_needed = {t.id: a.repeat - graded[t.id] for t in tasks}
-    try:
-        run_tasks(tasks, a, settings, pb_path)
-    except QuotaStop as e:
-        print(f"\n*** Stopped: {e}\n*** Runs finished before this are saved; rerun later or with another --model.")
+    for model in models:
+        settings = base.for_model(model)
+        print(f"\n##### model {model}", flush=True)
+        try:
+            run_tasks(remaining_tasks(a, settings), a, settings, pb_path)
+        except QuotaStop as e:
+            print(f"\n*** Stopped: {e}\n*** Runs finished before this are saved.", flush=True)
     print("\n" + write_report())
+
+
+def remaining_tasks(a: argparse.Namespace, settings: Settings) -> list[Task]:
+    """The selected tasks; with --resume, minus those already graded --repeat times for this model, code version
+    and condition. Sets a.repeat_needed so a partly done task only runs its missing repetitions."""
+    tasks = [t for t in TASKS if not a.only or t.id in a.only]
+    if not a.resume:
+        a.repeat_needed = {}
+        return tasks
+    version = code_version()
+    graded = Counter(
+        r["task"]
+        for r in load_history()
+        if r.get("model") == settings.llm_model
+        and r.get("code") == version
+        and bool(r.get("playbook")) == a.playbook
+        and not r.get("discarded")
+    )
+    todo = [t for t in tasks if graded[t.id] < a.repeat]
+    print(
+        f"--resume: {len(tasks) - len(todo)} task(s) already done for this version, {len(todo)} to go: "
+        f"{[t.id for t in todo]}",
+        flush=True,
+    )
+    a.repeat_needed = {t.id: a.repeat - graded[t.id] for t in todo}
+    return todo
 
 
 def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_path: Path) -> list[dict]:
@@ -225,6 +242,7 @@ def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_p
                 seconds=report.duration_s,
                 llm_calls=report.llm.get("calls", 0),
                 tokens=report.llm.get("prompt_tokens", 0) + report.llm.get("completion_tokens", 0),
+                cached_tokens=report.llm.get("cached_tokens", 0),
                 failures=[str(f) for f in failures],
                 info=t.info(state) if t.info else "",
                 run_id=report.run_id,

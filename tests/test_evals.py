@@ -3,6 +3,7 @@ real world states (seeded, and after the harness itself makes changes through th
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace as NS
 
 import httpx
@@ -188,7 +189,7 @@ def test_discarded_runs_are_counted_but_never_graded():
     hist = [run_row("a", True), dict(model="m", code="v2", task="b", discarded=True, reason="quota")]
     md = render_history(hist, "now")
     assert "| `m` | `v2` | 1 | 1 | 1.00 |" in md  # task b is not a graded task
-    assert "| 1/1 | 100 | 1 |" in md  # honesty, tokens, discarded columns
+    assert "| 1/1 | 100 | 100 | 1 |" in md  # honesty, tokens, quota tokens, discarded
     assert "Discarded (quota, not graded): b×1" in md
 
 
@@ -199,3 +200,33 @@ def test_playbook_runs_are_a_separate_condition():
     md = render_history(hist, "now")
     assert "| `m` | `v2` | 1 | 1 | 1.00 |" in md
     assert "| `m` with learning (--playbook) | `v2` | 1 | 1 | 0.00 |" in md
+
+
+def test_quota_tokens_exclude_prompt_cache_hits():
+    from evals.report import render_history
+
+    md = render_history([{**run_row("a", True, tokens=1000), "cached_tokens": 600}], "now")
+    assert "| 1/1 | 1,000 | 400 | 0 |" in md
+
+
+def test_models_rotation_moves_on_when_a_model_runs_out_of_quota(monkeypatch, tmp_path):
+    import sys
+
+    from evals import run_evals as re_
+
+    ran: list[tuple[str, list[str]]] = []
+
+    def fake_run(tasks, a, settings, pb):
+        ran.append((settings.llm_model, [t.id for t in tasks]))
+        if settings.llm_model == "m1":
+            raise re_.QuotaStop("m1 out of quota")
+
+    monkeypatch.setattr(re_, "HISTORY", tmp_path / "h.jsonl")
+    monkeypatch.setattr(re_, "write_report", lambda: "")  # must not overwrite the real evals/results.md
+    monkeypatch.setattr(re_, "ensure_world", lambda: None)
+    monkeypatch.setattr(re_, "run_tasks", fake_run)
+    re_.HISTORY.write_text(json.dumps({**run_row("acme_invoice", True, model="m2"), "code": re_.code_version()}) + "\n")
+    monkeypatch.setattr(sys, "argv", ["x", "--models", "m1,m2", "--only", "acme_invoice", "globex_eu_formats"])
+    re_.main()
+    assert ran[0] == ("m1", ["acme_invoice", "globex_eu_formats"])  # quota stop on m1 ...
+    assert ran[1] == ("m2", ["globex_eu_formats"])  # ... m2 continues, skipping what it already has (implied --resume)

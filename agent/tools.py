@@ -33,25 +33,23 @@ def fn(name: str, desc: str, props: dict, required: list[str]) -> dict:
     }
 
 
-EID = {"type": "integer", "description": "Element number from the latest observation, e.g. 7 for [7]"}
+EID = {"type": "integer", "description": "n from [n] in the latest observation"}
 
 BROWSER_GOTO = fn(
     "browser_goto",
-    "Open a URL in the browser. Returns an observation of the page.",
+    "Open a URL.",
     {"url": {"type": "string"}},
     ["url"],
 )
 BROWSER_CLICK = fn(
     "browser_click",
-    "Click a link or button by element number. Returns the resulting page.",
+    "Click a link or button.",
     {"element_id": EID},
     ["element_id"],
 )
 BROWSER_FILL = fn(
     "browser_fill",
-    "Fill one or more form fields (text inputs, textareas, selects) on the current page in one go. "
-    "For selects pass the visible option text. Values are read back so you can confirm them. "
-    "Does NOT submit; click the submit button afterwards.",
+    "Fill form fields in one go (selects: the visible option text). Values are read back. Does NOT submit.",
     {
         "fields": {
             "type": "array",
@@ -66,57 +64,47 @@ BROWSER_FILL = fn(
 )
 BROWSER_READ = fn(
     "browser_read",
-    "Read the full text of the current page (observations only show an excerpt).",
+    "Full text of the current page (observations show an excerpt).",
     {"offset": {"type": "integer", "description": "Character offset, default 0"}},
     [],
 )
-BROWSER_BACK = fn("browser_back", "Go back to the previous page.", {}, [])
+BROWSER_BACK = fn("browser_back", "Go back.", {}, [])
 LOGIN = fn(
     "login",
-    "Sign in to a site using the company credential vault. You never see the password; the browser fills it. "
-    "Use this whenever you reach a login page.",
-    {"site": {"type": "string", "description": "Vault site name, e.g. 'erp' or 'acme'"}},
+    "Sign in with the credential vault (you never see the password). Use on any login page.",
+    {"site": {"type": "string", "description": "Vault site name"}},
     ["site"],
 )
-LIST_FILES = fn("list_files", "List files in the shared workspace folder.", {}, [])
-READ_FILE = fn("read_file", "Read a text file from the workspace.", {"path": {"type": "string"}}, ["path"])
+LIST_FILES = fn("list_files", "List workspace files.", {}, [])
+READ_FILE = fn("read_file", "Read a workspace file.", {"path": {"type": "string"}}, ["path"])
 WRITE_FILE = fn(
     "write_file",
-    "Write a text file into the workspace (e.g. a report).",
+    "Write a workspace file (e.g. a report).",
     {"path": {"type": "string"}, "content": {"type": "string"}},
     ["path", "content"],
 )
 REMEMBER = fn(
     "remember",
-    "Save an important fact to working memory (amounts, ids, dates, what you have completed). Old page "
-    "observations are dropped from your context, memory is not. Use it for anything you will need later.",
+    "Save a fact to working memory, which survives when old observations are dropped.",
     {"key": {"type": "string"}, "value": {"type": "string"}},
     ["key", "value"],
 )
 ASK_HUMAN = fn(
     "ask_human",
-    "Ask the user a question and wait for the answer. Use ONLY when you cannot safely proceed: the request "
-    "is genuinely ambiguous after checking the available systems, information is missing, or something "
-    "looks suspicious. Do not ask for things you can look up yourself.",
+    "Ask the user and wait. Only when you cannot safely proceed after investigating.",
     {
         "question": {"type": "string"},
-        "options": {"type": "array", "items": {"type": "string"}, "description": "Optional suggested answers"},
+        "options": {"type": "array", "items": {"type": "string"}},
     },
     ["question"],
 )
 FINISH = fn(
     "finish",
-    "End the task. Call this only after you have checked that the outcome is in place, e.g. by viewing the "
-    "saved record. status: 'done' if the goal is achieved, 'failed' if it cannot be achieved, 'needs_user' "
-    "if a human must act.",
+    "End the task: done (achieved and checked), failed (cannot be achieved) or needs_user (a human must act).",
     {
         "status": {"type": "string", "enum": ["done", "failed", "needs_user"]},
-        "summary": {"type": "string", "description": "Concise answer/summary for the user, 1-4 sentences"},
-        "evidence": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Concrete facts proving the outcome (record ids, URLs, values seen)",
-        },
+        "summary": {"type": "string", "description": "1-4 sentences for the user"},
+        "evidence": {"type": "array", "items": {"type": "string"}, "description": "Facts you saw (ids, values)"},
     },
     ["status", "summary", "evidence"],
 )

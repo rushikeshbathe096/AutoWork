@@ -137,7 +137,13 @@ Every graded run is appended to `evals/history.jsonl` the moment it finishes, ta
 ```bash
 make evals ARGS="--model openai/gpt-oss-20b --only acme_invoice --repeat 4"
 make evals ARGS="--report"     # regenerate results.md from the history without running anything
+make evals ARGS="--models qwen/qwen3.8-27b,openai/gpt-oss-20b"   # rotate: next model when one runs out of quota
+make evals ARGS="--models qwen/qwen3.8-27b,gemini:gemini-3.8-flash"   # across providers (needs GEMINI_API_KEY)
 ```
+
+A `provider:` prefix selects another OpenAI-compatible provider for that model, with its own key from `.env` (currently `gemini:`, Google's OpenAI-compatible endpoint). Unprefixed models use `LLM_BASE_URL`.
+
+Free-tier throughput depends on tokens per run, so the harness records them. About 96% of a run's tokens are prompt, and about 60% of each prompt is fixed per run (system prompt, tool definitions, task brief). On Groq, prompt-cache hits don't count towards rate limits; on a real agent request to `gpt-oss-20b` 1,280 of 2,488 prompt tokens (51%) were cached. Groq caches only the gpt-oss models, so the report shows total tokens and the tokens that actually count against the quota. Tool descriptions no longer repeat guidance that the system prompt already gives (22% smaller, about 8% of each call).
 
 If the provider's quota runs out mid-suite, that run is discarded rather than graded as an agent failure, and the suite stops.
 

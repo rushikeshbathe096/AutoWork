@@ -226,6 +226,30 @@ def test_reasoning_effort_is_not_sent_unless_configured():
     assert "reasoning_effort" not in c.client.chat.completions.calls[0]
 
 
+def test_provider_prefix_selects_base_url_key_and_api_model():
+    env = {"LLM_API_KEY": "groq-key", "GEMINI_API_KEY": "gem-key", "LLM_MODEL": "gemini:gemini-3.8-flash"}
+    s = Settings.from_env(env)
+    assert s.llm_api_key == "gem-key" and "generativelanguage.googleapis.com" in s.llm_base_url
+    assert s.llm_model == "gemini:gemini-3.8-flash" and s.api_model == "gemini-3.8-flash"
+    groq = s.for_model("qwen/qwen3.8-27b", env)  # slashes are not provider prefixes
+    assert groq.llm_api_key == "groq-key" and groq.api_model == "qwen/qwen3.8-27b" and "groq" in groq.llm_base_url
+
+
+def test_provider_prefix_without_its_key_fails_fast():
+    with pytest.raises(SettingsError, match="GEMINI_API_KEY"):
+        Settings.from_env({"LLM_API_KEY": "k", "LLM_MODEL": "gemini:gemini-3.8-flash"})
+
+
+def test_request_uses_provider_model_id_and_drops_rejected_parallel_param():
+    s = Settings.from_env({"GEMINI_API_KEY": "g", "LLM_MODEL": "gemini:gemini-3.8-flash"})
+    rejected = err(openai.BadRequestError, 400, "Unknown name 'parallel_tool_calls': Cannot find field.")
+    c = LLMClient(s, client=FakeClient([rejected, ok_response()]), sleep=lambda w: None)  # type: ignore[arg-type]
+    c.chat([{"role": "user", "content": "x"}], tools=[{"type": "function"}])
+    first, second = c.client.chat.completions.calls
+    assert first["model"] == "gemini-3.8-flash" and "parallel_tool_calls" in first
+    assert "parallel_tool_calls" not in second and c.model == "gemini:gemini-3.8-flash"
+
+
 def test_retry_after_parses_groq_message():
     e = err(openai.RateLimitError, 429, "Rate limit reached. Please try again in 350ms.")
     assert _retry_after(e) == pytest.approx(0.85)
