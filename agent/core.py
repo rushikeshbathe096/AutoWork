@@ -25,6 +25,7 @@ from .context import Turn, build_messages, note
 from .interfaces import LLM, Emit, Human
 from .llm import LLMError, parse_json
 from .memory import Playbook, WorkingMemory
+from .provenance import Provenance
 from .stuck import ErrorStreak, RepetitionDetector, Signal
 from .tools import WORKER_TOOLS, ToolBox, ToolResult, tool_args_preview
 from .vault import Redactor, Vault
@@ -123,7 +124,9 @@ class Agent:
         self.browser = BrowserSession(
             self.run_dir / "shots", headless=self.headless, gate_high_risk=self.mode != "autonomous"
         ).start()
-        self.tools = ToolBox(self.browser, self.workspace, self.memory, self.vault, self.redactor)
+        self.provenance = Provenance()
+        self.provenance.observe(task)  # the user's own words are a source
+        self.tools = ToolBox(self.browser, self.workspace, self.memory, self.vault, self.redactor, self.provenance)
         try:
             report = self._run(task)
         except Exception as e:  # noqa: BLE001 - last line of defence: always return a report
@@ -156,7 +159,15 @@ class Agent:
             if status != "done":
                 return self._report(task, "needs_user" if status == "needs_user" else "failed", summary, evidence)
             verdict = self._verifier().verify(
-                Claim(task, plan.get("success_criteria", []), summary, evidence, self.memory.as_dict()), self.browser
+                Claim(
+                    task,
+                    plan.get("success_criteria", []),
+                    summary,
+                    evidence,
+                    self.memory.as_dict(),
+                    sources=list(self.tools.sources),
+                ),
+                self.browser,
             )
             if verdict.get("passed"):
                 self._learn(task)

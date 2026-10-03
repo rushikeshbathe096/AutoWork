@@ -68,9 +68,11 @@ class FakeLLM:
         self.stats = {"calls": 0}
         self.on_retry = None
         self.seen: list[list[dict]] = []
+        self.tools_offered: list[list[str]] = []
 
     def chat(self, messages, tools=None, require_tool=False, json_mode=False, **kw):
         self.seen.append(messages)
+        self.tools_offered.append([t["function"]["name"] for t in tools or []])
         self.stats["calls"] += 1
         item = self.script.pop(0)
         if isinstance(item, dict):

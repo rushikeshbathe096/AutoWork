@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from math import comb
 from statistics import mean
 
 # Most severe first: when a run has several failures, the headline category is the worst one.
@@ -63,3 +64,62 @@ def render(rows: list[dict], model: str, when: str) -> str:
     if not any(r["failures"] for r in rows):
         lines.append("None.")
     return "\n".join(lines) + "\n"
+
+
+def pass_hat_k(rows: list[dict], k: int) -> float | None:
+    """tau-bench's pass^k: the chance that k independent trials of a task ALL succeed, estimated without bias
+    per task as C(c, k) / C(n, k) from n trials with c successes, then averaged over tasks with n >= k.
+    pass^1 is the plain pass rate; a reliable agent keeps pass^k close to it as k grows."""
+    by_task: dict[str, list[bool]] = defaultdict(list)
+    for r in rows:
+        by_task[r["task"]].append(bool(r["passed"]))
+    est = [comb(sum(v), k) / comb(len(v), k) for v in by_task.values() if len(v) >= k]
+    return mean(est) if est else None
+
+
+def render_history(history: list[dict], when: str, ks: tuple[int, ...] = (1, 2, 4, 8)) -> str:
+    """Report over the append-only run history, one section per model and condition. Only runs from each
+    group's most recent code version are aggregated: runs made before a fix measured different code.
+    Runs with the playbook enabled (--playbook) are a separate condition: notes distilled in one repetition
+    help the next, which would inflate pass^k if mixed with independent trials.
+    Discarded runs (provider quota) are never graded, but they are counted and shown."""
+    if not history:
+        return "# Eval results\n\nNo runs recorded yet.\n"
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for r in history:
+        label = f"`{r.get('model', '?')}`" + (" with learning (--playbook)" if r.get("playbook") else "")
+        groups[label].append(r)
+    head = [
+        f"# Eval results (generated {when})\n",
+        "Ground truth is read from the ERP database, never from the agent. pass^k (from tau-bench) is the "
+        "probability that k repeated trials of a task **all** succeed, estimated per task as C(c,k)/C(n,k) from n "
+        "trials with c successes and averaged over tasks with at least k trials (`-`: too few trials). Small "
+        "samples: read every number together with its run count. Each row uses only runs of its latest code "
+        "version. Discarded runs hit the provider's quota (free tier) and were not graded.\n",
+        "| model | code version | graded runs | tasks | "
+        + " | ".join(f"pass^{k}" for k in ks)
+        + " | honesty | avg tokens | discarded |",
+        "|---|---|---|---|" + "---|" * len(ks) + "---|---|---|",
+    ]
+    sections = []
+    for label, rs in sorted(groups.items()):
+        version = rs[-1].get("code", "?")
+        same = [r for r in rs if r.get("code", "?") == version]
+        cur = [r for r in same if not r.get("discarded")]
+        dropped = Counter(r["task"] for r in same if r.get("discarded"))
+        pk = [pass_hat_k(cur, k) for k in ks]
+        head.append(
+            f"| {label} | `{version}` | {len(cur)} | {len({r['task'] for r in cur})} | "
+            + " | ".join("-" if v is None else f"{v:.2f}" for v in pk)
+            + f" | {sum(r['honest'] for r in cur)}/{len(cur)} | "
+            + (f"{mean(r['tokens'] for r in cur):,.0f}" if cur else "-")
+            + f" | {sum(dropped.values())} |"
+        )
+        older = len(rs) - len(same)
+        body = render(cur, label, when).split("\n", 1)[1] if cur else "\nNo graded runs yet.\n"
+        note = f"\n_{older} older run(s) from previous code versions not aggregated._\n" if older else ""
+        if dropped:
+            note += "\n_Discarded (quota, not graded): " + ", ".join(f"{t}×{n}" for t, n in sorted(dropped.items()))
+            note += "._\n"
+        sections.append(f"\n## {label}\n{note}{body}")
+    return "\n".join(head) + "\n" + "".join(sections)

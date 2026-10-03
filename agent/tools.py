@@ -14,6 +14,7 @@ from pathlib import Path
 from .browser import ApprovalRequired, BrowserError, wrap_untrusted
 from .interfaces import Browser
 from .memory import WorkingMemory
+from .provenance import Provenance
 from .vault import Redactor, Vault
 
 MAX_READ_BYTES = 200_000  # refuse to load bigger files at all
@@ -171,6 +172,11 @@ def confine(root: Path, rel: str) -> Path:
     return full
 
 
+# Tools whose output is an observation of the environment, i.e. a legitimate source of data values.
+# Not remember / browser_fill / write_file: echoing the agent's own output would launder invented values.
+SOURCE_TOOLS = {"browser_goto", "browser_click", "browser_read", "browser_back", "login", "read_file", "list_files"}
+
+
 class ToolBox:
     def __init__(
         self,
@@ -179,8 +185,11 @@ class ToolBox:
         memory: WorkingMemory | None = None,
         vault: Vault | None = None,
         redactor: Redactor | None = None,
+        provenance: Provenance | None = None,
     ):
         self.browser = browser
+        self.provenance = provenance
+        self.sources: list[str] = []  # pages and files observed, in order: pointers for the auditor
         self.workspace = workspace
         self.memory = memory
         self.vault = vault
@@ -195,7 +204,16 @@ class ToolBox:
         if impl is None:
             return ToolResult(f"ERROR: unknown tool {name!r}", "unknown tool", ok=False)
         try:
-            return self._redact(impl(step=step, **args))
+            result = self._redact(impl(step=step, **args))
+            if name in SOURCE_TOOLS:
+                if self.provenance:
+                    self.provenance.observe(result.text)
+                where = f"workspace file {args.get('path')}" if name == "read_file" else None
+                if name.startswith("browser_") or name == "login":
+                    where = self._current_url()
+                if where and where not in self.sources:
+                    self.sources.append(where)
+            return result
         except ApprovalRequired:
             raise  # the agent loop handles this: it asks a human
         except WorkspaceError as e:
@@ -214,6 +232,9 @@ class ToolBox:
                     screenshot=self.browser.last.screenshot if self.browser.last else None,
                 )
             )
+
+    def _current_url(self) -> str | None:
+        return getattr(getattr(self.browser, "last", None), "url", None)
 
     def _redact(self, r: ToolResult) -> ToolResult:
         """Defence in depth: even if a page echoes a secret back, it never reaches the prompt."""
@@ -239,7 +260,18 @@ class ToolBox:
 
     def _t_browser_fill(self, fields: list, step: int):
         out = self.browser.fill(fields)
-        return ToolResult(out, out[:300], ok="MISMATCH" not in out)
+        unsourced = [
+            f"[{f.get('element_id')}] {f.get('value')!r}"
+            for f in fields
+            if isinstance(f, dict) and self.provenance and not self.provenance.is_sourced(str(f.get("value", "")))
+        ]
+        if unsourced:
+            out += (
+                "\nUNSOURCED VALUES: " + ", ".join(unsourced) + " do not appear in the task or in anything you "
+                "observed this run (dates and amounts compared in any format). Do not invent data: find the source "
+                "and correct the field, or clear it if it is optional. Ask the human if the data does not exist."
+            )
+        return ToolResult(out, out[:300], ok="MISMATCH" not in out and not unsourced)
 
     def _t_browser_read(self, step: int, offset: int = 0):
         out = self.browser.read(int(offset or 0))

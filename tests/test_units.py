@@ -10,7 +10,7 @@ from agent import policy
 from agent.browser import Snapshot
 from agent.config import Settings, SettingsError
 from agent.context import Turn, build_messages, note
-from agent.llm import LLMClient, LLMError, ToolCall, _retry_after, parse_json
+from agent.llm import LLMClient, LLMError, QuotaExhausted, ToolCall, _retry_after, parse_json
 from agent.memory import Playbook, WorkingMemory
 from agent.stuck import ErrorStreak, RepetitionDetector, Signal
 from agent.tools import ToolResult
@@ -179,6 +179,51 @@ def test_gives_up_after_max_attempts_and_rejects_other_400s():
     c, _ = make([err(openai.BadRequestError, 400, "context length exceeded")])
     with pytest.raises(LLMError, match="rejected"):
         c.chat([{"role": "user", "content": "x"}])
+
+
+def test_rate_limits_do_not_consume_failure_attempts():
+    # Regression from the first live eval: free-tier 429s used up max_attempts and killed a healthy run.
+    limited = err(openai.RateLimitError, 429, headers={"retry-after": "1"})
+    c, waits = make([limited] * 8 + [ok_response()])
+    assert c.chat([{"role": "user", "content": "x"}], max_attempts=3).content == "hi"
+    assert len(waits) == 8
+
+
+def test_rate_limit_wait_is_bounded_in_seconds():
+    limited = err(openai.RateLimitError, 429, headers={"retry-after": "50"})
+    c, waits = make([limited] * 10)
+    assert not c.quota_exhausted
+    with pytest.raises(QuotaExhausted, match="rate limited"):
+        c.chat([{"role": "user", "content": "x"}], max_rate_limit_wait_s=120)
+    assert sum(waits) <= 120
+    assert c.quota_exhausted  # the eval harness discards such runs instead of grading them
+
+
+def test_malformed_tool_call_corrections_do_not_stack():
+    bad = err(openai.BadRequestError, 400, "tool_use_failed: bad")
+    c, _ = make([bad, bad, ok_response(tool=("finish", "{}"))])
+    c.chat([{"role": "user", "content": "x"}], tools=[{"type": "function"}])
+    third = c.client.chat.completions.calls[2]["messages"]
+    assert len(third) == 2 and "malformed" in third[-1]["content"]
+
+
+def test_reasoning_budget_exhaustion_retries_with_more_budget_and_less_effort():
+    # Regression from the first live eval: gpt-oss spent max_tokens on hidden reasoning and never wrote the
+    # tool call. Groq reports that as tool_use_failed with an empty failed_generation; a nudge can't fix it.
+    exhausted = err(openai.BadRequestError, 400, "{'error': {'code': 'tool_use_failed', 'failed_generation': ''}}")
+    s = Settings.from_env({"LLM_API_KEY": "t", "LLM_REASONING_EFFORT": "medium", "LLM_MAX_OUTPUT_TOKENS": "1000"})
+    c = LLMClient(s, client=FakeClient([exhausted, ok_response(tool=("finish", "{}"))]), sleep=lambda w: None)  # type: ignore[arg-type]
+    c.chat([{"role": "user", "content": "x"}], tools=[{"type": "function"}], require_tool=True)
+    first, second = c.client.chat.completions.calls
+    assert (first["max_tokens"], first["reasoning_effort"]) == (1000, "medium")
+    assert (second["max_tokens"], second["reasoning_effort"]) == (2000, "low")
+    assert len(second["messages"]) == 1  # no misleading "your call was malformed" correction
+
+
+def test_reasoning_effort_is_not_sent_unless_configured():
+    c, _ = make([ok_response()])
+    c.chat([{"role": "user", "content": "x"}])
+    assert "reasoning_effort" not in c.client.chat.completions.calls[0]
 
 
 def test_retry_after_parses_groq_message():

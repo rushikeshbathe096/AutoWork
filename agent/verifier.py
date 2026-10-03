@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import prompts
 from .browser import ApprovalRequired, BrowserSession
 from .context import tool_call
 from .interfaces import LLM, Browser, Emit, Message
-from .tools import VERIFIER_TOOLS, ToolBox, ToolResult, tool_args_preview
+from .tools import VERDICT, VERIFIER_TOOLS, ToolBox, ToolResult, tool_args_preview
 from .vault import Redactor, Vault
 
 MAX_AUDIT_STEPS = 10
@@ -33,6 +33,7 @@ class Claim:
     summary: str
     evidence: list[str]
     facts: dict[str, str]
+    sources: list[str] = field(default_factory=list)  # pages/files the worker observed: where to look, not what's true
 
 
 class Verifier:
@@ -64,17 +65,37 @@ class Verifier:
                 if why := self.over_budget():
                     self.emit("warning", {"message": f"Verification stopped: {why}"})
                     break
-                r = self.llm.chat(msgs, tools=VERIFIER_TOOLS, require_tool=True)
+                # WHY force on the last step: a weaker model that wanders (seen live: it read an unrelated CSV)
+                # otherwise ends "inconclusive", and a correct run is reported as unverified.
+                last = step == MAX_AUDIT_STEPS
+                turn = msgs + [
+                    {
+                        "role": "user",
+                        "content": f"[audit step {step}/{MAX_AUDIT_STEPS}] "
+                        + (
+                            "This is your LAST step: call verdict now, based only on what you have seen. If you "
+                            "could not confirm a criterion, that is passed=false."
+                            if last
+                            else "Check the next criterion, or call verdict once all are checked."
+                        ),
+                    }
+                ]
+                r = self.llm.chat(turn, tools=[VERDICT] if last else VERIFIER_TOOLS, require_tool=True)
                 if not r.tool_calls:
                     msgs.append({"role": "user", "content": "Call a tool (verdict when done)."})
                     continue
                 c = r.tool_calls[0]
                 if c.name == "verdict":
                     v = {
-                        "passed": bool(c.arguments.get("passed")),
+                        "passed": c.arguments.get("passed") is True,  # anything but an explicit true fails
                         "reason": c.arguments.get("reason", ""),
                         "evidence": c.arguments.get("evidence", []),
                     }
+                    if last and v["passed"] and not v["evidence"]:
+                        # A verdict forced by the step budget must not default towards passing: a pass needs
+                        # cited evidence. Errs towards "unverified", which the honesty metric scores as safe.
+                        v["passed"] = False
+                        v["reason"] = f"forced verdict claimed a pass without evidence ({v['reason']})"
                     self.emit("verify_result", v)
                     return v
                 try:
@@ -108,6 +129,7 @@ class Verifier:
     @staticmethod
     def _opening(claim: Claim) -> list[Message]:
         criteria = "\n".join(f"- {c}" for c in claim.success_criteria) or "- (derive from the task)"
+        sources = "\n".join(f"- {u}" for u in claim.sources[-15:]) or "- (none recorded)"
         return [
             {"role": "system", "content": prompts.VERIFIER},
             {
@@ -115,6 +137,7 @@ class Verifier:
                 "content": f"USER TASK:\n{claim.task}\n\nSUCCESS CRITERIA:\n{criteria}\n\n"
                 f"WORKER'S CLAIM:\n{claim.summary}\nEvidence claimed: {claim.evidence}\n\n"
                 f"Facts the worker recorded: {json.dumps(claim.facts)}\n\n"
+                f"Sources the worker looked at (go straight to the relevant ones to compare data):\n{sources}\n\n"
                 "Start page: http://localhost:8001/",
             },
         ]

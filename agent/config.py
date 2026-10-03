@@ -37,6 +37,8 @@ class Settings:
     llm_base_url: str
     llm_model: str
     llm_timeout_s: float
+    llm_max_output_tokens: int
+    llm_reasoning_effort: str  # "" = provider default (and the parameter is not sent at all)
     mode: str
     max_steps: int
     max_tokens_total: int
@@ -62,9 +64,12 @@ class Settings:
         base_url = e.get("LLM_BASE_URL", "https://api.groq.com/openai/v1")
         if urlparse(base_url).scheme not in ("http", "https") or not urlparse(base_url).netloc:
             errors.append(f"LLM_BASE_URL={base_url!r} must be an http(s) URL")
-        model = e.get("LLM_MODEL", "openai/gpt-oss-120b").strip()
+        model = e.get("LLM_MODEL", "qwen/qwen3.8-27b").strip()  # see docs/decisions/0006 for why not gpt-oss-120b
         if not model:
             errors.append("LLM_MODEL must not be empty")
+        effort = e.get("LLM_REASONING_EFFORT", "").strip().lower()
+        if effort not in ("", "low", "medium", "high"):
+            errors.append(f"LLM_REASONING_EFFORT={effort!r} must be low, medium or high (or unset)")
         mode = e.get("AUTOWORK_MODE", "balanced")
         if mode not in MODES:
             errors.append(f"AUTOWORK_MODE={mode!r} must be one of {MODES}")
@@ -74,6 +79,8 @@ class Settings:
             llm_base_url=base_url,
             llm_model=model,
             llm_timeout_s=num("LLM_TIMEOUT_S", "90", float, 1, 600),
+            llm_max_output_tokens=num("LLM_MAX_OUTPUT_TOKENS", "4096", int, 256, 65_536),
+            llm_reasoning_effort=effort,
             mode=mode,
             max_steps=num("AUTOWORK_MAX_STEPS", "40", int, 1, 200),
             max_tokens_total=num("AUTOWORK_MAX_TOKENS", "400000", int, 1000, 10_000_000),

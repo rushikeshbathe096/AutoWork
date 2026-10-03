@@ -89,6 +89,50 @@ def test_verifier_cannot_write(tmp_path, ws):
     assert any("INDEPENDENT AUDIT FAILED" in str(m) for m in agent.llm.seen[-1])
 
 
+def test_auditor_is_pointed_at_sources_and_forced_to_a_verdict(tmp_path, ws):
+    # Regression from a live eval: a correct run ended "unverified" because the auditor wandered until its
+    # step budget ran out. On its last step it may now only call verdict.
+    from agent.verifier import MAX_AUDIT_STEPS
+
+    admin_post("/admin/reset", None)
+    wander = [("browser_read", {})] * (MAX_AUDIT_STEPS - 1)
+    script = [
+        PLAN,
+        *LOGIN,
+        ("finish", {"status": "done", "summary": "done", "evidence": []}),
+        *wander,
+        ("verdict", {"passed": False, "reason": "could not confirm the bill", "evidence": []}),
+        ("finish", {"status": "failed", "summary": "gave up", "evidence": []}),
+    ]
+    agent, events = make_agent(tmp_path, ws, script, mode="autonomous")
+    agent.run("x")
+    result = next(d for k, d in events if k == "verify_result")
+    assert not result.get("inconclusive") and result["reason"] == "could not confirm the bill"
+    audit_calls = agent.llm.tools_offered[4 : 4 + MAX_AUDIT_STEPS]
+    assert audit_calls[-1] == ["verdict"] and "browser_read" in audit_calls[0]
+    opening = agent.llm.seen[4][1]["content"]
+    assert "Sources the worker looked at" in opening and "/erp/bills/new" in opening
+
+
+def test_forced_verdict_cannot_pass_without_evidence(tmp_path, ws):
+    from agent.verifier import MAX_AUDIT_STEPS
+
+    admin_post("/admin/reset", None)
+    script = [
+        PLAN,
+        *LOGIN,
+        ("finish", {"status": "done", "summary": "done", "evidence": []}),
+        *[("browser_read", {})] * (MAX_AUDIT_STEPS - 1),
+        ("verdict", {"passed": True, "reason": "looks fine", "evidence": []}),  # a guess under budget pressure
+        ("finish", {"status": "failed", "summary": "gave up", "evidence": []}),
+    ]
+    agent, events = make_agent(tmp_path, ws, script, mode="autonomous")
+    r = agent.run("x")
+    result = next(d for k, d in events if k == "verify_result")
+    assert result["passed"] is False and "without evidence" in result["reason"]
+    assert r.status != "verified"
+
+
 def test_loop_detection_escalates_to_human(tmp_path, ws):
     admin_post("/admin/reset", None)
     same = ("browser_goto", {"url": W + "/mail"})

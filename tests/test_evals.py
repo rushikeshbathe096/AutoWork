@@ -139,3 +139,63 @@ def test_render_aggregates_per_task():
     md = render(rows, "m", "now")
     assert "| a | 3 | 2/3 | 3/3 | 11.0 | 1,000 | 30 | wrong_data×1 |" in md
     assert "**Overall: 2/3 runs passed**" in md and "[wrong_data] x" in md
+
+
+# ----------------------------------------------------------------- pass^k and the run history
+def run_row(task, passed, model="m", code="v2", tokens=100):
+    return dict(
+        model=model,
+        code=code,
+        task=task,
+        rep=1,
+        passed=passed,
+        honest=True,
+        category="-" if passed else "missing",
+        agent_status="verified" if passed else "failed",
+        steps=5,
+        seconds=1.0,
+        tokens=tokens,
+        failures=[] if passed else ["[missing] x"],
+        info="",
+        run_id="r",
+    )
+
+
+def test_pass_hat_k_matches_tau_bench_estimator():
+    from evals.report import pass_hat_k
+
+    rows = [run_row("a", p) for p in (True, True, True, False)] + [run_row("b", True)] * 4
+    assert pass_hat_k(rows, 1) == pytest.approx((3 / 4 + 1) / 2)
+    assert pass_hat_k(rows, 2) == pytest.approx((3 / 6 + 1) / 2)  # C(3,2)/C(4,2) for task a
+    assert pass_hat_k(rows, 4) == pytest.approx((0 + 1) / 2)
+    assert pass_hat_k(rows, 8) is None  # no task has 8 trials: not estimable
+
+
+def test_history_report_separates_models_and_ignores_older_code_versions():
+    from evals.report import render_history
+
+    hist = [run_row("a", False, code="v1")] * 3 + [run_row("a", True, code="v2")] * 2
+    hist += [run_row("a", False, model="other", code="v2")]
+    md = render_history(hist, "now")
+    assert "| `m` | `v2` | 2 | 1 | 1.00 | 1.00 | - | - |" in md  # v1 runs measured old code
+    assert "3 older run(s)" in md
+    assert "| `other` | `v2` | 1 | 1 | 0.00 |" in md
+
+
+def test_discarded_runs_are_counted_but_never_graded():
+    from evals.report import render_history
+
+    hist = [run_row("a", True), dict(model="m", code="v2", task="b", discarded=True, reason="quota")]
+    md = render_history(hist, "now")
+    assert "| `m` | `v2` | 1 | 1 | 1.00 |" in md  # task b is not a graded task
+    assert "| 1/1 | 100 | 1 |" in md  # honesty, tokens, discarded columns
+    assert "Discarded (quota, not graded): b×1" in md
+
+
+def test_playbook_runs_are_a_separate_condition():
+    from evals.report import render_history
+
+    hist = [run_row("a", True), {**run_row("a", False), "playbook": True}]
+    md = render_history(hist, "now")
+    assert "| `m` | `v2` | 1 | 1 | 1.00 |" in md
+    assert "| `m` with learning (--playbook) | `v2` | 1 | 1 | 0.00 |" in md

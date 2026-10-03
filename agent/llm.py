@@ -5,6 +5,8 @@ agent.config.Settings.
 Reliability concerns handled here (so the agent loop doesn't have to):
   * 429 rate limits / 5xx  -> exponential backoff honoring Retry-After
   * Groq `tool_use_failed` -> the model emitted a malformed tool call; retry with a nudge
+  * ...with an EMPTY failed_generation -> a reasoning model spent its whole output budget thinking
+    and never wrote the call; retry with a bigger budget and lower reasoning effort (a nudge can't help)
   * tool_choice="required" unsupported -> fall back to "auto"
 """
 
@@ -44,6 +46,11 @@ class LLMError(RuntimeError):
     pass
 
 
+class QuotaExhausted(LLMError):
+    """The provider will not serve us for longer than we are willing to wait (e.g. a free tier's daily
+    token limit). An infrastructure condition, not agent behaviour: eval harnesses must not grade it."""
+
+
 class LLMClient:
     def __init__(
         self,
@@ -54,6 +61,7 @@ class LLMClient:
         """`client` and `sleep` are injectable so retry behaviour can be unit-tested without network or waiting."""
         s = settings or Settings.from_env()
         self.model = s.llm_model
+        self.max_output_tokens, self.reasoning_effort = s.llm_max_output_tokens, s.llm_reasoning_effort
         if client is None:
             if not s.llm_api_key:
                 raise LLMError("No LLM API key: set LLM_API_KEY (or GROQ_API_KEY) in .env, see .env.example")
@@ -65,6 +73,7 @@ class LLMClient:
         self._sleep = sleep
         self.on_retry: Callable[[str], None] | None = None
         self.stats = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "retries": 0}
+        self.quota_exhausted = False  # set when a call gave up on rate limits; the agent turns errors into reports
         self._tool_choice_required_ok = True
 
     def chat(
@@ -75,10 +84,18 @@ class LLMClient:
         json_mode: bool = False,
         temperature: float = 0.2,
         max_attempts: int = 6,
+        max_rate_limit_wait_s: float = 300,
     ) -> LLMResponse:
+        """`max_attempts` bounds real failures (malformed output, 5xx, connection errors). Rate limits have
+        their own budget in seconds of waiting: on a free tier a 429 is throttling, not a failure, and
+        letting it consume `max_attempts` aborted a healthy run mid-task (first live eval)."""
         msgs = list(messages)
-        for attempt in range(1, max_attempts + 1):
-            kwargs: dict = dict(model=self.model, messages=msgs, temperature=temperature, max_tokens=2048)
+        attempt, rate_hits, rate_waited = 0, 0, 0.0
+        out_tokens, effort = self.max_output_tokens, self.reasoning_effort
+        while attempt < max_attempts:
+            kwargs: dict = dict(model=self.model, messages=msgs, temperature=temperature, max_tokens=out_tokens)
+            if effort:
+                kwargs["reasoning_effort"] = effort
             if tools:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "required" if (require_tool and self._tool_choice_required_ok) else "auto"
@@ -88,20 +105,39 @@ class LLMClient:
             try:
                 resp = self.client.chat.completions.create(**kwargs)
             except openai.RateLimitError as e:
-                wait = _retry_after(e) or min(60, 2**attempt)
-                self._retry(f"rate limited by provider, waiting {wait:.0f}s (attempt {attempt})")
+                rate_hits += 1
+                wait = _retry_after(e) or min(60, 2**rate_hits)
+                if rate_waited + wait > max_rate_limit_wait_s:
+                    self.quota_exhausted = True
+                    raise QuotaExhausted(
+                        f"still rate limited after waiting {rate_waited:.0f}s (next wait {wait:.0f}s): {str(e)[:200]}"
+                    ) from e
+                rate_waited += wait
+                self._retry(f"rate limited by provider, waiting {wait:.0f}s ({rate_waited:.0f}s so far)")
                 self._sleep(wait)
                 continue
             except (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError) as e:
+                attempt += 1
                 wait = min(30, 2**attempt)
                 self._retry(f"provider error {type(e).__name__}, retrying in {wait}s")
                 self._sleep(wait)
                 continue
             except openai.BadRequestError as e:
                 body = str(e)
+                if "tool_use_failed" in body and _empty_generation(e):
+                    attempt += 1
+                    out_tokens = min(out_tokens * 2, 32_768)
+                    effort = "low" if effort else effort
+                    self._retry(
+                        f"model used its output budget on reasoning without calling a tool; retrying "
+                        f"with max_tokens={out_tokens}" + (", reasoning_effort=low" if effort else "")
+                    )
+                    continue
                 if "tool_use_failed" in body or "Failed to call a function" in body:
-                    self._retry("model produced a malformed tool call; retrying with a correction")
-                    msgs = msgs + [
+                    attempt += 1
+                    self._retry(f"model produced a malformed tool call; retrying with a correction: {body[:300]}")
+                    # Replace, don't stack: repeated corrections only grow the prompt.
+                    msgs = list(messages) + [
                         {
                             "role": "user",
                             "content": "Your previous tool call was malformed. Call exactly ONE tool with valid JSON "
@@ -141,6 +177,15 @@ class LLMClient:
         log.warning(msg)
         if self.on_retry:
             self.on_retry(msg)
+
+
+def _empty_generation(e: openai.APIStatusError) -> bool:
+    """Groq reports a tool call that was never written as tool_use_failed with failed_generation=''."""
+    body = e.body if isinstance(e.body, dict) else {}
+    err = body.get("error", body) if isinstance(body.get("error", body), dict) else {}
+    if "failed_generation" in err:
+        return not err["failed_generation"]
+    return bool(re.search(r"failed_generation['\"]?\s*:\s*(''|\"\")", str(e)))
 
 
 def _retry_after(e: openai.APIStatusError) -> float | None:
