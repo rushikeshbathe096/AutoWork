@@ -33,12 +33,13 @@ from agent.config import (
     save_world_snapshot,
 )
 from agent.llm import LLMClient
+from agent.usage import UsageLogger
 from agent.vault import Redactor, Vault
 from agent.verifier import Claim, Verifier
 from evals.legacy_verifier import LegacyClaim, LegacyVerifier
 from evals.replay import NotReplayable, replay, task_of
 from evals.run_evals import ensure_world, load_history
-from evals.tasks import Task
+from evals.tasks import TASKS, Task
 
 RESULTS = ROOT / "evals" / "reverify.jsonl"
 
@@ -59,13 +60,15 @@ def _sources_and_facts(run_dir: Path) -> tuple[list[str], dict]:
     return sources, facts
 
 
-def prepare(run_id: str, work: Path) -> tuple[Task, Claim, list[str], dict, Path, list[str]]:
+def prepare(
+    run_id: str, work: Path, task_id: str | None = None
+) -> tuple[Task, Claim, list[str], dict, Path, list[str]]:
     """World snapshot + claim for a run: saved ones when present, else rebuilt by offline replay."""
     run_dir = RUNS_DIR / run_id
     notes: list[str] = []
     if (run_dir / "world.db").exists() and (run_dir / "claim.json").exists():
         claim = Claim(**json.loads((run_dir / "claim.json").read_text()))
-        task = task_of(run_id, claim.task)
+        task = next((t for t in TASKS if t.id == task_id), None) if task_id else task_of(run_id, claim.task)
         if task is None:
             raise NotReplayable(f"{run_id}: not an eval run")
         sources, facts = _sources_and_facts(run_dir)
@@ -80,10 +83,10 @@ def prepare(run_id: str, work: Path) -> tuple[Task, Claim, list[str], dict, Path
     return r.recording.task, r.claims[-1], r.sources, r.facts, snap, notes
 
 
-def prepare_graded(run_id: str, work: Path, human_log: list[dict]):
+def prepare_graded(run_id: str, work: Path, human_log: list[dict], task_id: str | None = None):
     """prepare(), then grade the work against the restored world: (task, claim, sources, facts, snapshot, notes,
     work_complete, ground_truth_failures)."""
-    task, claim, sources, facts, snap, notes = prepare(run_id, work)
+    task, claim, sources, facts, snap, notes = prepare(run_id, work, task_id)
     restore_world_snapshot(snap)  # grade the state the run left, not whatever the world holds now
     complete, failures = ground_truth(task, claim, human_log)
     return task, claim, sources, facts, snap, notes, complete, failures
@@ -98,6 +101,8 @@ def ground_truth(task: Task, claim: Claim, human_log: list[dict]) -> tuple[bool,
 
 def audit(variant: str, claim: Claim, sources: list[str], facts: dict, settings: Settings, out: Path) -> dict:
     llm = LLMClient(settings)
+    out.mkdir(parents=True, exist_ok=True)
+    llm.set_usage_logger(UsageLogger(out, out.parent.name))  # counted by the quota ledger like any other run
     vault = Vault.load()
     events: list[tuple[str, dict]] = []
     cls = LegacyVerifier if variant == "legacy" else Verifier
@@ -131,6 +136,7 @@ def main() -> None:
     ap.add_argument("run_ids", nargs="+")
     ap.add_argument("--verifier", choices=("fixed", "legacy", "both"), default="fixed")
     ap.add_argument("--model", help="auditor model (default: the model of the original run)")
+    ap.add_argument("--task", help="eval task id, for a UI run whose task text several eval tasks share")
     a = ap.parse_args()
     ensure_world()
     rows = {r.get("run_id"): r for r in load_history() if "passed" in r}
@@ -142,7 +148,7 @@ def main() -> None:
         work = Path(tempfile.mkdtemp(prefix=f"reverify-{rid}-"))
         try:
             task, claim, sources, facts, snap, notes, complete, failures = prepare_graded(
-                rid, work, row.get("human", [])
+                rid, work, row.get("human", []), a.task
             )
         except (NotReplayable, KeyError, FileNotFoundError) as e:
             print(f"{rid}: SKIPPED: {e}", flush=True)

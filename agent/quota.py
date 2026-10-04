@@ -47,7 +47,7 @@ class KeyQuota:
 
 
 def _rows(runs_dir: Path):
-    for log in runs_dir.glob("*/llm_usage.jsonl"):
+    for log in runs_dir.rglob("llm_usage.jsonl"):  # runs, and the re-audits stored inside them
         try:
             lines = log.read_text().splitlines()
         except OSError:

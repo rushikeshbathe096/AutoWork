@@ -88,6 +88,8 @@ def test_a_old_paid_invoice_claimed_as_latest_is_not_verified(tmp_path, ws):
             ],
         }
     )
+    # asked to complete its evidence (the repair rounds), the auditor repeats its verdict: still not verified
+    llm.scripts["verifier"] += [llm.scripts["verifier"][-1]] * 2
     agent, events = make_agent(tmp_path, ws, llm, max_verify_rounds=0)
     r = agent.run(ACME_TASK)
     verdict = next(d for k, d in events if k == "verify_result")
@@ -167,6 +169,8 @@ def test_b_issue_date_entered_as_due_date_is_not_verified(tmp_path, ws):
             ],
         }
     )
+    # asked to complete its evidence (the repair rounds), the auditor repeats its verdict: still not verified
+    llm.scripts["verifier"] += [llm.scripts["verifier"][-1]] * 2
     agent, events = make_agent(tmp_path, ws, llm, max_verify_rounds=0)
     r = agent.run(INITECH_TASK)
     verdict = next(d for k, d in events if k == "verify_result")
@@ -490,10 +494,116 @@ def test_reference_key_must_identify_exactly_one_directory_row():
     assert v["passed"] is False and "matches 2 directory rows" in v["reason"], v["reason"]
 
 
+def test_reference_accepts_the_auditors_own_field_names_but_not_lenient_checks():
+    # live (qwen re-audit of 20261004-171043-eef0): all four values right, under its own names
+    own = {
+        "id": "C1",
+        "ok": True,
+        "record_id_used": "3",
+        "source_id_in_directory": "3",
+        "source_key_value": "ar@globex.example",
+        "directory_url": DIRECTORY,
+    }
+    assert enforce(_ref_verdict(own), REF_ITEMS, REF_CL, SEEN_REF, [REC], W_)["passed"] is True
+    wrong = {**own, "record_id_used": "2"}
+    v = enforce(_ref_verdict(wrong), REF_ITEMS, REF_CL, SEEN_REF, [REC], W_)
+    assert v["passed"] is False and "belongs to ID 2" in v["reason"]
+
+
 def test_a_field_carrying_ids_is_checked_as_a_reference_even_if_not_marked():
     items = [("C1", "Vendor", "field"), ("C2", "Due date", "field")]
     v = enforce(_ref_verdict(_ref("2", "3", "ar@globex.example")), items, REF_CL, SEEN_REF, [REC], W_)
     assert v["passed"] is False and "belongs to ID 2" in v["reason"]
+
+
+def test_a_pass_missing_evidence_goes_back_to_the_auditor_once_and_wrong_values_do_not(tmp_path, ws):
+    """Live (qwen, 20261004-171043-eef0): every field matched, but the vendor reference had no IDs, so a correct run
+    ended unverified. A pass rejected for missing evidence goes back to the auditor to complete; a wrong value
+    still fails at once."""
+    admin_post("/admin/reset")
+    worker = [
+        *LOGIN,
+        (
+            "browser_fill",
+            {
+                "fields": [
+                    {"element_id": 6, "value": "Acme Supplies Inc."},
+                    {"element_id": 7, "value": "INV-2003"},
+                    {"element_id": 8, "value": "615.40"},
+                    {"element_id": 10, "value": "2026-09-15"},
+                    {"element_id": 11, "value": "2026-10-15"},
+                ]
+            },
+        ),
+        ("browser_click", {"element_id": 13}),
+        ("finish", {"status": "done", "summary": "Filed INV-2003", "evidence": ["saved"]}),
+    ]
+    checklist = {
+        "fields": ["Vendor", "Invoice number"],
+        "references": ["Vendor"],
+        "conditions": [],
+        "source_apps": ["acme"],
+        "values_in_task": False,
+    }
+    common = [
+        {"id": "C2", "ok": True, "record_value": "INV-2003", "source_value": "INV-2003"},
+        {"id": "C3", "ok": True},
+    ]
+    no_ids = {
+        "passed": True,
+        "reason": "all match",
+        "evidence": ["portal"],
+        "source": W + "/acme/invoices/INV-2003",
+        "checks": [{"id": "C1", "ok": True, "record_value": "Acme Supplies Inc.", "source_value": "Acme"}, *common],
+    }
+    with_ids = {
+        **no_ids,
+        "checks": [
+            {
+                "id": "C1",
+                "ok": True,
+                "record_id": "1",
+                "source_id": "1",
+                "source_key": "Acme Supplies Inc.",
+                "directory": DIRECTORY,
+            },
+            *common,
+        ],
+    }
+
+    def audit(second):
+        return [
+            ("login", {"site": "acme"}),
+            ("browser_goto", {"url": W + "/acme/invoices/INV-2003"}),
+            ("browser_goto", {"url": DIRECTORY}),
+            ("verdict", no_ids),
+            ("verdict", second),
+        ]
+
+    def run(second):
+        llm = RoleLLM(
+            {
+                "planner": [_plan("File INV-2003", ["A bill for INV-2003 exists"])],
+                "worker": list(worker),
+                "distiller": [{"notes": []}],
+                "verifier_checklist": [checklist],
+                "verifier": audit(second),
+            }
+        )
+        agent, events = make_agent(tmp_path, ws, llm, max_verify_rounds=0)
+        r = agent.run("File Acme's expedited shipping surcharge invoice in the ERP.")
+        notes = [d["text"] for k, d in events if k == "verify_step" and d["tool"] == "verdict"]
+        return r, next(d for k, d in events if k == "verify_result"), notes, llm
+
+    r, verdict, notes, llm = run(with_ids)
+    assert r.status == "verified" and verdict["passed"] is True
+    assert notes and "needs record_id, source_id" in notes[0]  # the rejected first verdict, sent back
+    feedback = [m["content"] for m in llm.seen[-2] if m.get("role") == "tool"][-1]
+    assert feedback.startswith("Verdict NOT accepted")
+    admin_post("/admin/reset")
+    wrong = {**with_ids, "checks": [{**with_ids["checks"][0], "record_id": "2"}, *common]}  # a wrong vendor
+    r, verdict, notes, _ = run(wrong)
+    assert r.status == "unverified" and "belongs to ID 2" in verdict["reason"]
 
 
 def test_lookalike_vendor_is_not_verified(tmp_path, ws):

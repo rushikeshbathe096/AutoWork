@@ -40,6 +40,7 @@ from .vault import Redactor, Vault
 from .world import World, default_world
 
 MAX_AUDIT_STEPS = 10
+MAX_REPAIRS = 2  # times a pass rejected for missing evidence is returned to the auditor to complete
 
 
 @dataclass
@@ -100,6 +101,24 @@ def _norm_id(x: object) -> str:
     return str(x or "").strip().lstrip("#").lower()
 
 
+def _ref_fields(c: dict) -> dict:
+    """The four reference fields, accepting the auditor's own spellings (seen live on qwen: record_id_used,
+    source_id_in_directory, source_key_value, directory_url). Only the names are lenient, never the checks."""
+    out = dict(c)
+    for k, v in c.items():
+        n = k.lower()
+        words = n.split("_")
+        if "key" in words and "source" in words:
+            out.setdefault("source_key", v)
+        elif "id" in words and "record" in words:
+            out.setdefault("record_id", v)
+        elif "id" in words and "source" in words:  # e.g. source_id_in_directory
+            out.setdefault("source_id", v)
+        elif "directory" in words:
+            out.setdefault("directory", v)
+    return out
+
+
 def check_reference(c: dict, source_text: str, seen: dict[str, list[str]]) -> tuple[str, bool] | None:
     """A reference field (e.g. the vendor of a bill) is checked by ID in the directory, never by name similarity
     (2026-10-04: an auditor accepted "Globex Corporation" for "Globex Receivables" by name, which would equally
@@ -107,6 +126,7 @@ def check_reference(c: dict, source_text: str, seen: dict[str, list[str]]) -> tu
     the ID the record's entry has there, the ID the source maps to, and the key that maps it: a value shown on
     the source that matches exactly one directory row (an email address, an exact legal name). Returns
     (problem, is_wrong_value) or None when the reference checks out."""
+    c = _ref_fields(c)
     rec_id, src_id = _norm_id(c.get("record_id")), _norm_id(c.get("source_id"))
     key, directory = str(c.get("source_key") or "").strip(), str(c.get("directory") or "").strip()
     if not (rec_id and src_id and key and directory):
@@ -233,7 +253,7 @@ def enforce(
     src.observe(source_text)
     for i, t, kind in items:
         c = checks[i]
-        if kind == "ref" or (kind == "field" and c.get("record_id") and c.get("source_id")):
+        if kind == "ref" or (kind == "field" and _ref_fields(c).get("record_id") and _ref_fields(c).get("source_id")):
             if problem := check_reference(c, source_text, seen):
                 why, wrong = problem
                 return downgrade(f"{i} ({t}): {why}" if wrong else f"pass rejected: {i} ({t}): {why}", not wrong)
@@ -330,6 +350,7 @@ class Verifier:
         msgs = self._opening(claim, items, checklist)
         try:
             final_retry = True
+            repairs = MAX_REPAIRS
             step = 0
             while step < MAX_AUDIT_STEPS:
                 step += 1
@@ -384,7 +405,30 @@ class Verifier:
                         # cited evidence. Errs towards "unverified", which the honesty metric scores as safe.
                         v["passed"] = False
                         v["reason"] = f"forced verdict claimed a pass without evidence ({v['reason']})"
+                    claimed_pass = v["passed"]
                     v = enforce(v, items, checklist, tools.seen, claim.record_locations, self.world)
+                    if claimed_pass and v.get("inconclusive") and repairs and step < MAX_AUDIT_STEPS:
+                        # WHY: a pass rejected for MISSING evidence (no vendor IDs, an item not reported) can often be
+                        # completed (seen live on qwen: every field matched, the vendor IDs were left out). Wrong
+                        # values are never repaired: they fail at once.
+                        repairs -= 1
+                        self.emit("verify_step", {"tool": "verdict", "args": "", "ok": False, "text": v["reason"]})
+                        msgs.append(
+                            {
+                                "role": "assistant",
+                                "content": r.content or None,
+                                "tool_calls": [tool_call(c.id, c.name, c.raw_arguments)],
+                            }
+                        )
+                        msgs.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": c.id,
+                                "content": f"Verdict NOT accepted: {v['reason']}\nOpen what is missing, then call "
+                                "verdict again with every required field.",
+                            }
+                        )
+                        continue
                     self.emit("verify_result", v)
                     return v
                 try:

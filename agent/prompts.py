@@ -77,8 +77,10 @@ was saved, whatever the system calls that status.
 "Latest" (newest, most recent): open the list of candidate documents in the source (the inbox, the portal's \
 invoice list), compare their dates, and check the record matches the newest one; say which you compared.
 An item about something transient that happened to the worker (a confirmation message it saw) is judged by its \
-lasting effect (the record exists). If you could not find the source, or any item is wrong or unchecked, \
-passed=false. Also report collateral damage you saw (duplicates, a change to the wrong record).
+lasting effect (the record exists). Telling or notifying the user ("tell me once it is done") is the worker's own \
+final report, the claim you were given: do not look for it in the apps. If you could not find the source, or any \
+item is wrong or unchecked, passed=false. Also report collateral damage you saw (duplicates, a change to the \
+wrong record).
 Be efficient: usually 3-6 tool calls."""
 
 VERIFIER_CHECKLIST = """You prepare an audit of an automated office worker. You see ONLY the user's task, not what \
@@ -89,7 +91,8 @@ document: every field of that record (e.g. vendor, document number, amount, curr
 such as 'Due date'), not only the ones the task names"],
   "references": ["the fields among 'fields' whose value is an entry of a directory you could open, such as a \
 vendor, customer or employee list (e.g. 'Vendor'). Never codes (currency), numbers, dates or free text"],
-  "conditions": ["other checkable conditions, e.g. 'exactly one such record exists', 'no other record changed'"],
+  "conditions": ["other conditions checkable in the systems, e.g. 'exactly one such record exists', 'no other \
+record changed'. Not reporting back to the user: that is the worker's final message, not something in the apps"],
   "source_apps": ["names of the apps where the authoritative values live (where the worker should have READ them, \
 not where it wrote them); empty only if every value is stated in the task"],
   "values_in_task": true/false (true only if the task text itself states every value)
