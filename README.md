@@ -23,7 +23,7 @@ Nothing in the agent is specific to invoices. The same loop, tools and prompts a
 Requirements: Python 3.12, Linux or macOS (Windows: see below). Developed and tested on Linux.
 
 ```bash
-git clone <this repo> && cd AutoWork
+git clone https://github.com/rushikeshbathe096/AutoWork.git && cd AutoWork
 make setup            # venv + pinned deps + Playwright Chromium + .env from the template
 # edit .env: set LLM_API_KEY (a Groq key works; any OpenAI-compatible provider does)
 #   optional: GEMINI_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY + LLM_FALLBACK_MODELS (see below)
@@ -54,10 +54,29 @@ What each `make` target runs:
 
 **Windows:** `make` needs WSL (recommended: follow the Linux steps inside WSL) or Git Bash. Without either, run the commands above in PowerShell with `python` instead of `python3` and `.venv\Scripts\python` instead of `.venv/bin/python`, e.g. `python -m venv .venv`, `.venv\Scripts\python -m pip install -r requirements.lock -r requirements-dev.txt`, `.venv\Scripts\python -m playwright install chromium`, `copy .env.example .env`, `.venv\Scripts\python run.py`. Native Windows has not been tested.
 
-| URL | What |
-|---|---|
-| http://localhost:8000 | **AutoWork UI**: run a task (with a fault injected if you like), follow each step, the apps it visits and what it sees, approve or answer questions, stop a run, see which success criteria the independent check confirmed |
-| http://localhost:8001 | The simulated company: webmail `/mail`, Acme vendor portal `/acme`, internal ERP `/erp` |
+| URL | What | Credentials |
+|---|---|---|
+| http://localhost:8000 | **AutoWork UI**: run tasks, inspect execution steps, approve actions, view verifier criteria | None (local control plane) |
+| http://localhost:8001/erp | **Internal ERP**: view bills, vendors, payments and audit logs | `ap.clerk` / `ledger-42` |
+| http://localhost:8001/acme | **Acme Vendor Portal**: view invoices and due dates | `ourco-ap` / `Acme!2026` |
+| http://localhost:8001/mail | **Company Webmail**: inspect incoming vendor emails and attachments | Open (no login required) |
+
+### Direct Database Access (SQLite)
+
+The simulated company stores its entire relational state in a local SQLite database at `data/world.db` (auto-created from seed data on startup or when "Reset simulated world first" is ticked).
+
+You can query the database directly at any time:
+
+```bash
+# View bills entered into the ERP
+sqlite3 data/world.db "SELECT id, invoice_number, amount_cents, currency, due_date, status FROM erp_bills;"
+
+# View ERP audit log
+sqlite3 data/world.db "SELECT id, action, detail, at FROM erp_audit;"
+
+# View vendor directory
+sqlite3 data/world.db "SELECT id, name, email FROM erp_vendors;"
+```
 
 Other entry points:
 

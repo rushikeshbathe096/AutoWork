@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -128,26 +129,52 @@ class Settings:
         mode = e.get("AUTOWORK_MODE", "balanced")
         if mode not in MODES:
             errors.append(f"AUTOWORK_MODE={mode!r} must be one of {MODES}")
-        api_key = e.get("LLM_API_KEY") or e.get("GROQ_API_KEY") or ""  # GROQ_API_KEY: fallback for the default
-        default_url, default_key = base_url, api_key
+        default_url = base_url
 
-        def resolve(m: str, var: str) -> tuple[str, list[str]]:
-            """Base URL and key(s) for model m. A key variable may hold several comma-separated keys (key
-            rotation): each has its own quota, and the client moves to the next when one is exhausted."""
+        def keys_of(names: tuple[str, ...], order_var: str) -> list[tuple[int, str]]:
+            """(number, key) pairs for one provider, in the order to use them. Keys come from numbered variables
+            (LLM_API_KEY1, LLM_API_KEY2, ...: the number is the key's label, so its quota ledger stays with it
+            whatever the order) or, if there are none, from one variable holding comma-separated keys (numbered by
+            position). `order_var` (e.g. LLM_KEY_ORDER=2,3) puts those keys first, then the rest by number."""
+            numbered = sorted(
+                (int(mt.group(1)), str(v).strip())
+                for k, v in e.items()
+                for n in names
+                if (mt := re.fullmatch(rf"{n}(\d+)", k)) and str(v).strip()
+            )
+            if not numbered:
+                raw = next((e[n] for n in names if e.get(n)), "")
+                numbered = [(i, k.strip()) for i, k in enumerate(raw.split(","), 1) if k.strip()]
+            nums = [n for n, _ in numbered]
+            if len(set(nums)) != len(nums):
+                errors.append(f"{names[0]}<N>: the same key number is set twice")
+            first: list[int] = []
+            for x in (t.strip() for t in e.get(order_var, "").split(",")):
+                if not x:
+                    continue
+                if not x.isdigit() or int(x) not in nums:
+                    errors.append(f"{order_var}={e.get(order_var)!r}: {x!r} is not one of the key numbers {nums}")
+                elif int(x) not in first:
+                    first.append(int(x))
+            return sorted(numbered, key=lambda p: (first.index(p[0]) if p[0] in first else len(first), p[0]))
+
+        def resolve(m: str, var: str) -> tuple[str, list[tuple[int, str]]]:
+            """Base URL and keys for model m. Several keys rotate: each has its own quota, and the client moves to
+            the next when one is exhausted."""
             prefix, sep, rest = m.partition(":")
             if sep and prefix in PROVIDERS:
                 url, key_var = PROVIDERS[prefix]
-                if not e.get(key_var):
+                keys = keys_of((key_var,), key_var.replace("_API_KEY", "_KEY_ORDER"))
+                if not keys:
                     errors.append(f"{var}={m!r} needs {key_var} in .env")
-                raw = e.get(key_var, "")
             else:
-                url, raw = default_url, default_key
-            return url, [k.strip() for k in raw.split(",") if k.strip()] or [""]
+                url, keys = default_url, keys_of(("LLM_API_KEY", "GROQ_API_KEY"), "LLM_KEY_ORDER")
+            return url, keys or [(1, "")]
 
         def with_rotation(m: str, var: str) -> tuple[Fallback, ...]:
             url, keys = resolve(m, var)
             prov = provider_of(m, url)
-            return tuple(Fallback(m, url, k, f"{prov}#{i}") for i, k in enumerate(keys, 1))
+            return tuple(Fallback(m, url, k, f"{prov}#{n}") for n, k in keys)
 
         primary, *rotation = with_rotation(model, "LLM_MODEL")
         base_url, api_key = primary.base_url, primary.api_key

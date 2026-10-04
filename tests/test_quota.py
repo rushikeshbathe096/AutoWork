@@ -189,3 +189,32 @@ def test_ui_run_cap_applies_and_a_short_quota_is_refused_with_the_wait(tmp_path,
     h = {"X-AutoWork-Token": sa.CONTROL_TOKEN, "Origin": "http://localhost:8000"}
     r = c.post("/api/runs", json={"task": "x", "max_run_tokens": 60_000}, headers=h)
     assert r.status_code == 429 and "the run cap is 60,000 tokens" in r.json()["detail"]
+
+
+def test_numbered_keys_keep_their_label_and_follow_the_key_order():
+    """LLM_API_KEY1..3 with LLM_KEY_ORDER=2,3: key 2 first, then 3, then the rest. Labels come from the variable's
+    number, not the position, so key 1's past usage in the ledger stays with key 1."""
+    env = {"LLM_API_KEY1": "a", "LLM_API_KEY2": "b", "LLM_API_KEY3": "c", "LLM_MODEL": QWEN, "LLM_KEY_ORDER": "2,3"}
+    s = Settings.from_env(env)
+    assert (s.llm_key_label, s.llm_api_key) == ("groq#2", "b")
+    assert [(f.key_label, f.api_key) for f in s.llm_fallbacks] == [("groq#3", "c"), ("groq#1", "a")]
+    plain = Settings.from_env({k: v for k, v in env.items() if k != "LLM_KEY_ORDER"})
+    assert [plain.llm_key_label, *(f.key_label for f in plain.llm_fallbacks)] == ["groq#1", "groq#2", "groq#3"]
+    with pytest.raises(ValueError, match="LLM_KEY_ORDER"):
+        Settings.from_env({**env, "LLM_KEY_ORDER": "4"})
+
+
+def test_preflight_uses_the_key_order_and_skips_a_used_key(tmp_path):
+    env = {
+        "LLM_API_KEY1": "a",
+        "LLM_API_KEY2": "b",
+        "LLM_API_KEY3": "c",
+        "LLM_MODEL": QWEN,
+        "LLM_KEY_ORDER": "2,3",
+        "AUTOWORK_MAX_RUN_TOKENS": "150000",
+    }
+    write_usage(tmp_path, "r1", [use(T0, 150_000, key="groq#1")])  # the old key's usage stays with key 1
+    assert preflight(Settings.from_env(env), tmp_path, now=T0).llm_key_label == "groq#2"
+    write_usage(tmp_path, "r2", [use(T0, 100_000, key="groq#2")])
+    chosen = preflight(Settings.from_env(env), tmp_path, now=T0)
+    assert chosen.llm_key_label == "groq#3" and [f.key_label for f in chosen.llm_fallbacks][:2] == ["groq#2", "groq#1"]
