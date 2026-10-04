@@ -6,7 +6,7 @@ but irreversible actions are gated regardless of what the model thinks.
 
 Modes:
   autonomous  - no approvals (blocked actions still blocked)
-  balanced    - approval for high-risk actions (payments, deletion, money movement)   [default]
+  balanced    - approval for high-risk actions, as declared in the world config (config/world.json)   [default]
   supervised  - approval also for any data-changing submit (save/create/update/send)
 """
 
@@ -15,7 +15,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-HIGH_RISK = re.compile(r"\b(pay|paid|payment|delete|remove|wire|transfer|refund|approve|cancel|terminate)\b", re.I)
+from .world import default_world
+
 WRITE = re.compile(r"\b(save|submit|create|update|send|confirm|post|apply|add)\b", re.I)
 
 
@@ -26,14 +27,19 @@ class Decision:
     risk: str = "low"
 
 
-def evaluate(tool: str, args: dict, snapshot, mode: str = "balanced") -> Decision:
+def evaluate(
+    tool: str, args: dict, snapshot, mode: str = "balanced", high_risk: re.Pattern[str] | None = None
+) -> Decision:
+    """`high_risk`: button-label rule from the world config (agent/world.py); the checked-in world by default."""
+    if high_risk is None:
+        high_risk = default_world().risk.button_label
     if tool == "browser_click" and snapshot is not None:
         el = snapshot.element(int(args.get("element_id", -1))) if str(args.get("element_id", "")).isdigit() else None
         if el is None:
             return Decision("allow")  # browser layer will report the bad id
         label = " ".join(str(el.get(k, "")) for k in ("text", "label", "href"))
         is_control = el["tag"] == "button" or el.get("type") in ("submit", "button")
-        if is_control and HIGH_RISK.search(label):
+        if is_control and high_risk.search(label):
             risk = "high"
             if mode != "autonomous":
                 return Decision("approve", f'Irreversible action: pressing "{label.strip()}" on {snapshot.url}', risk)

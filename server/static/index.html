@@ -6,78 +6,230 @@
 <meta name="autowork-token" content="__AUTOWORK_TOKEN__">
 <title>AutoWork</title>
 <style>
-:root{--bg:#0b1020;--panel:#121a2e;--line:#22304f;--text:#e6ebf5;--muted:#8b98b5;--accent:#6ea8fe;--ok:#3ecf8e;--bad:#ff6b6b;--warn:#f5b945;--human:#c792ea}
+:root{
+  --paper:#fbf9f4; --panel:#f5f3ee; --panel-2:#f0eee9; --line:#e4e2dd; --line-2:#d6d3cc;
+  --ink:#1b1c19; --muted:#5f5e61; --faint:#8a8885;
+  --orange:#cc4900; --orange-ink:#a33900; --orange-soft:#fff1ea;
+  --amber:#9a5b00; --amber-line:#e0a446; --amber-soft:#fdf4e3;
+  --green:#006b2c; --green-soft:#e4f3e8; --red:#ba1a1a; --red-soft:#fde8e6;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
 *{box-sizing:border-box}
-body{margin:0;font:14px/1.45 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
-header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line)}
-header h1{font-size:17px;margin:0} header span{color:var(--muted)}
-.grid{display:grid;grid-template-columns:330px 1fr 440px;gap:14px;padding:14px;height:calc(100vh - 52px)}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto}
-h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:4px 0 10px}
-textarea,select,input[type=text]{width:100%;background:#0d1426;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:8px;font:inherit}
-textarea{min-height:110px;resize:vertical}
-button{background:var(--accent);color:#08101f;border:0;border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer}
-button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
-button:disabled{opacity:.5;cursor:default}
-.preset{display:block;width:100%;text-align:left;margin:6px 0;font-weight:400;font-size:13px}
-.row{display:flex;gap:8px;align-items:center;margin:8px 0} .row label{color:var(--muted)}
-.ev{border-left:3px solid var(--line);padding:6px 10px;margin:6px 0;background:#0e1629;border-radius:0 6px 6px 0;white-space:pre-wrap;word-break:break-word}
-.ev .k{font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em}
-.ev.thought{border-color:#5c6b8f} .ev.action{border-color:var(--accent)} .ev.obs-ok{border-color:#2b3d63;color:#aab6d3;font-size:12px}
-.ev.obs-bad{border-color:var(--bad);font-size:12px} .ev.warning,.ev.error,.ev.llm_retry{border-color:var(--warn)}
-.ev.human_request,.ev.human_response,.ev.policy{border-color:var(--human)} .ev.verify{border-color:var(--ok)}
-.ev.plan{border-color:#4fd1c5} .ev.final{border-color:var(--ok)}
-.ev details summary{cursor:pointer;color:var(--muted)}
-.shot{width:100%;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:zoom-in}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px} .kv b{color:var(--muted);font-weight:500}
-.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600}
-.verified{background:#12392b;color:var(--ok)} .failed,.error,.budget_exhausted{background:#3d1717;color:var(--bad)}
-.unverified,.needs_user{background:#3b2f12;color:var(--warn)} .running{background:#172a4d;color:var(--accent)}
-#ask{display:none;border:2px solid var(--human);background:#1d1630;border-radius:10px;padding:12px;margin-bottom:12px}
-#ask h3{margin:0 0 6px;color:var(--human);font-size:14px} .pre{white-space:pre-wrap}
-.runs a{color:var(--text);text-decoration:none;display:block;padding:4px 0;font-size:12px;border-bottom:1px solid var(--line)}
-.muted{color:var(--muted)} ul{padding-left:18px;margin:4px 0}
-@media (max-width:1100px){.grid{grid-template-columns:1fr;height:auto}}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.45 var(--sans)}
+button,input,select,textarea{font:inherit;color:inherit}
+.mono{font-family:var(--mono);font-size:12px}
+.muted{color:var(--muted)}
+h2{font-size:13px;font-weight:600;margin:0 0 8px;color:var(--ink)}
+h3{font-size:13px;font-weight:600;margin:0}
+*{scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:2px solid var(--paper)}
+
+/* header */
+header{height:48px;display:flex;align-items:center;gap:16px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--paper)}
+.brand{display:flex;align-items:center;gap:7px;font-weight:600;font-size:15px}
+.brand i{width:7px;height:7px;background:var(--orange);display:block}
+.sep{width:1px;height:18px;background:var(--line)}
+.meta{display:flex;align-items:center;gap:14px;font-size:13px;color:var(--muted);min-width:0}
+.meta b{font-weight:500;color:var(--ink)}
+.meta .mono{color:var(--ink)}
+header .spacer{flex:1}
+
+/* phase rail */
+.rail{display:flex;align-items:center;gap:0;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.phase{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--faint);transition:color .3s}
+.phase .dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--line-2);background:var(--paper);transition:background .3s,border-color .3s}
+.phase.done{color:var(--muted)} .phase.done .dot{background:var(--ink);border-color:var(--ink)}
+.phase.active{color:var(--ink);font-weight:600} .phase.active .dot{background:var(--orange);border-color:var(--orange)}
+.phase.waiting .dot{background:var(--amber-line);border-color:var(--amber-line)}
+.bar{flex:0 0 48px;height:2px;margin:0 10px;background:var(--line);position:relative;overflow:hidden}
+.bar::after{content:"";position:absolute;inset:0;background:var(--ink);transform:scaleX(0);transform-origin:left;transition:transform .4s}
+.bar.done::after{transform:scaleX(1)}
+.rail .note{margin-left:16px;font-size:13px;color:var(--muted)}
+
+/* layout */
+.grid{display:grid;grid-template-columns:300px minmax(0,1fr) 420px;height:calc(100vh - 48px - 39px)}
+.col{overflow:auto;border-right:1px solid var(--line)} .col:last-child{border-right:0}
+.col.center{display:flex;flex-direction:column;overflow:hidden}
+.col.center .map{flex:none} .col.center .timeline{flex:1;overflow:auto}
+.sec{padding:14px 16px;border-bottom:1px solid var(--line)}
+.sec:last-child{border-bottom:0}
+
+/* controls */
+textarea{width:100%;min-height:96px;resize:vertical;padding:8px 10px;background:#fff;border:1px solid var(--line-2);border-radius:4px;line-height:1.45}
+select,input[type=number],input[type=text]{width:100%;padding:6px 8px;background:#fff;border:1px solid var(--line-2);border-radius:4px}
+label.field{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0;cursor:pointer}
+.check input{margin-top:3px;accent-color:var(--ink)}
+.btn{border:1px solid var(--line-2);background:#fff;border-radius:4px;padding:6px 12px;cursor:pointer;font-size:13px}
+.btn:hover{background:var(--panel-2)}
+.btn.primary{background:var(--orange);border-color:var(--orange);color:#fff;font-weight:600}
+.btn.primary:hover{background:var(--orange-ink)}
+.btn.primary:disabled{opacity:.5;cursor:default}
+.btn.approve{background:var(--amber);border-color:var(--amber);color:#fff;font-weight:600}
+.btn.stop{border-color:#e0b3ae;color:var(--red);background:#fff}
+.row{display:flex;gap:8px;align-items:center;margin-top:12px}
+.examples button{display:block;width:100%;text-align:left;background:none;border:0;padding:5px 0;color:var(--muted);cursor:pointer;font-size:13px;border-bottom:1px solid var(--line)}
+.examples button:hover{color:var(--ink)}
+.runs a{display:flex;gap:8px;align-items:baseline;padding:5px 0;color:var(--ink);text-decoration:none;font-size:13px;border-bottom:1px solid var(--line)}
+.runs a span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.notes li{font-size:13px;color:var(--muted);margin:4px 0}
+
+/* pills: run status and criteria results only */
+.pill{display:inline-block;border-radius:99px;padding:1px 9px;font-size:12px;font-weight:600;white-space:nowrap;border:1px solid transparent}
+.pill.ok{background:var(--green-soft);color:var(--green)}
+.pill.bad{background:var(--red-soft);color:var(--red)}
+.pill.wait{background:var(--amber-soft);color:var(--amber);border-color:var(--amber-line)}
+.pill.run{background:var(--orange-soft);color:var(--orange-ink)}
+.pill.neutral{background:var(--panel-2);color:var(--muted)}
+
+/* run map */
+.map{padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.map svg{width:100%;height:120px;display:block}
+.map .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:4px}
+.map .legend span::before{content:"";display:inline-block;width:18px;height:0;border-top:2px solid var(--ink);vertical-align:middle;margin-right:6px}
+.map .legend span.ver::before{border-top-style:dashed;border-color:var(--muted)}
+.edge{fill:none;stroke-width:2}
+.edge.agent{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);animation:draw .4s ease-out forwards}
+.edge.verifier{stroke-dasharray:6 5;animation:fade .4s ease-out}
+@keyframes draw{to{stroke-dashoffset:0}}
+
+/* timeline */
+.timeline{padding:12px 16px 40px;position:relative}
+.empty{color:var(--muted);font-size:13px;padding:24px 0}
+.step{position:relative;padding:8px 10px 8px 22px;border-left:2px solid var(--line);margin-left:6px;transition:opacity .3s,background .3s}
+.step::before{content:"";position:absolute;left:-6px;top:13px;width:10px;height:10px;border-radius:50%;background:var(--paper);border:2px solid var(--line-2)}
+.step.past{opacity:.72}
+.step.current{background:var(--orange-soft);border-left-color:var(--orange);opacity:1}
+.step.current::before{background:var(--orange);border-color:var(--orange)}
+.step.err::before{background:var(--red);border-color:var(--red)}
+.step.err{border-left-color:var(--red)}
+.step.flash{animation:flash .4s ease-out}
+.step.recovered{border-left-color:var(--green)}
+.step.recovered::before{border-color:var(--green)}
+.step.auditor{border-left:2px dashed var(--faint)}
+.step.auditor::before{border-color:var(--faint);background:var(--paper)}
+.step .head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.step .tool{font-family:var(--mono);font-size:12px;font-weight:600}
+.step .args{font-family:var(--mono);font-size:12px;color:var(--muted);word-break:break-all}
+.step .when{margin-left:auto;font-size:12px;color:var(--faint)}
+.step .why{font-size:13px;color:var(--muted);margin-top:2px}
+.step .out{font-size:13px;margin-top:3px}
+.step .out.bad{color:var(--red)}
+.step .link{font-size:12px;color:var(--green);margin-top:3px;cursor:pointer;background:none;border:0;padding:0;text-decoration:underline}
+.step details{margin-top:4px} .step summary{font-size:12px;color:var(--faint);cursor:pointer}
+.step pre{white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:12px;background:#fff;border:1px solid var(--line);padding:8px;max-height:260px;overflow:auto;margin:4px 0 0}
+.note-row{margin:6px 0 6px 6px;padding:6px 10px 6px 22px;border-left:2px solid var(--line);font-size:13px;color:var(--muted)}
+.note-row.err{color:var(--red);border-left-color:var(--red)}
+.note-row.ask{color:var(--amber);border-left-color:var(--amber-line)}
+.divider{margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;font-weight:600}
+.fade-in{animation:fade .3s ease-out}
+@keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+@keyframes flash{from{background:#f7c9c4}to{background:transparent}}
+.hl{outline:2px solid var(--red);outline-offset:2px;transition:outline-color .4s}
+
+/* right column */
+.browser{border:1px solid var(--line);background:#fff}
+.urlbar{display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line);background:var(--panel-2)}
+.urlbar .mono{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#fff;border:1px solid var(--line);padding:2px 6px}
+.shotwrap{position:relative;min-height:60px}
+.shotwrap img{width:100%;display:block;cursor:zoom-in}
+.tag{position:absolute;left:8px;top:8px;font-family:var(--mono);font-size:12px;background:var(--ink);color:#fff;padding:2px 6px;border-radius:3px}
+.caption{font-size:12px;color:var(--muted);padding:6px 8px;border-top:1px solid var(--line)}
+.facts .fact{padding:6px 0;border-bottom:1px solid var(--line)}
+.facts .fact .k{font-size:13px;color:var(--muted)}
+.facts .fact .v{font-family:var(--mono);font-size:12px;word-break:break-word}
+.facts .fact .src{font-size:12px;color:var(--faint);word-break:break-all}
+.criteria li{list-style:none;display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+.criteria ul{padding:0;margin:0}
+.criteria li .txt{flex:1}
+.criteria li .ev{display:block;font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:2px;word-break:break-word}
+.criteria li .pill{transition:background .3s,color .3s}
+.criteria .sub{font-size:13px;color:var(--muted);margin:12px 0 4px}
+.result p{margin:6px 0;font-size:13px}
+.result ul{margin:4px 0;padding-left:18px;font-size:13px}
+
+/* approval */
+.scrim{position:fixed;inset:0;background:rgba(27,28,25,.38);opacity:0;pointer-events:none;transition:opacity .25s;z-index:10}
+.scrim.on{opacity:1;pointer-events:auto}
+.card{position:fixed;left:50%;top:84px;transform:translate(-50%,-8px);width:min(560px,92vw);background:#fff;border:1px solid var(--amber-line);border-top:4px solid var(--amber-line);border-radius:6px;box-shadow:0 10px 40px rgba(0,0,0,.18);padding:16px 18px;z-index:11;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
+.card.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
+.card h3{font-size:15px;margin-bottom:6px;color:var(--amber)}
+.card.question{border-color:var(--line-2);border-top-color:var(--ink)} .card.question h3{color:var(--ink)}
+.card .q{white-space:pre-wrap;font-size:13px}
+.card .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:10px 0;font-size:13px}
+.card .kv .k{color:var(--muted)}
+.card img{width:100%;border:1px solid var(--line);margin:6px 0;max-height:220px;object-fit:cover;object-position:top}
+.card .row{margin-top:10px}
+
+@media (max-width:1180px){.grid{grid-template-columns:1fr;height:auto}.col{border-right:0;border-bottom:1px solid var(--line)}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.edge.agent{stroke-dashoffset:0}}
 </style>
 </head>
 <body>
-<header><h1>AutoWork</h1><span>autonomous task worker: real browser, real apps, verified outcomes</span><span id="status" style="margin-left:auto"></span></header>
+<header>
+  <div class="brand"><i></i>AutoWork</div>
+  <div class="sep"></div>
+  <div class="meta" id="meta"><span class="muted">No run selected</span></div>
+  <div class="spacer"></div>
+  <button class="btn stop" id="stop" hidden>Stop</button>
+</header>
+<div class="rail" id="rail"></div>
 <div class="grid">
-  <div class="panel">
-    <h2>Task</h2>
-    <textarea id="task" placeholder="Describe what you need done…">Find the latest invoice from Acme, extract the amount and due date, enter it into our ERP, and tell me once it is done.</textarea>
-    <div class="row"><label>Mode</label><select id="mode"><option value="balanced">balanced: approve irreversible actions</option><option value="supervised">supervised: approve every data change</option><option value="autonomous">autonomous: no approvals</option></select></div>
-    <div class="row"><input type="checkbox" id="reset" checked><label for="reset">Reset simulated world first</label></div>
-    <div class="row"><input type="checkbox" id="pb"><label for="pb">Use learned playbook</label></div>
-    <h2 style="margin-top:12px">Inject faults</h2>
-    <div class="row"><input type="checkbox" id="f1"><label for="f1">Vendor portal login fails once (503)</label></div>
-    <div class="row"><input type="checkbox" id="f2"><label for="f2">ERP save times out (504) but saves</label></div>
-    <div class="row"><input type="checkbox" id="f3"><label for="f3">ERP session expires after 3 views</label></div>
-    <div class="row"><button id="go">Run task</button><button class="ghost" id="clearpb" title="Forget learned notes">Clear playbook</button></div>
-    <h2 style="margin-top:14px">Example tasks</h2>
-    <div id="presets"></div>
-    <h2 style="margin-top:14px">Past runs</h2>
-    <div class="runs" id="runs"></div>
+  <div class="col">
+    <div class="sec">
+      <label class="field" for="task" style="margin-top:0">Task</label>
+      <textarea id="task">Find the latest invoice from Acme, extract the amount and due date, enter it into our ERP, and tell me once it is done.</textarea>
+      <label class="field" for="mode">Mode</label>
+      <select id="mode">
+        <option value="balanced">Balanced</option>
+        <option value="supervised">Supervised</option>
+        <option value="autonomous">Autonomous</option>
+      </select>
+      <div class="muted" id="modeHint" style="font-size:13px;margin-top:4px"></div>
+      <label class="field" for="cap">Token cap for this run (0 uses the .env setting)</label>
+      <input type="number" id="cap" min="0" step="10000" value="0">
+      <label class="check"><input type="checkbox" id="reset" checked>Reset the simulated world first</label>
+      <label class="check"><input type="checkbox" id="pb">Use the learned playbook</label>
+      <div class="row"><button class="btn primary" id="go">Run task</button></div>
+    </div>
+    <div class="sec">
+      <h2>Inject a fault</h2>
+      <label class="check"><input type="checkbox" id="f1">Vendor portal login fails once (503)</label>
+      <label class="check"><input type="checkbox" id="f2">ERP save times out (504) but saves</label>
+      <label class="check"><input type="checkbox" id="f3">ERP session expires after 3 page views</label>
+    </div>
+    <div class="sec examples"><h2>Examples</h2><div id="presets"></div></div>
+    <div class="sec runs"><h2>Past runs</h2><div id="runs"></div></div>
+    <div class="sec"><h2>Learned playbook</h2><div id="playbook" class="notes"></div>
+      <div class="row"><button class="btn" id="clearpb">Clear playbook</button></div></div>
   </div>
-  <div class="panel" id="timelinePanel">
-    <div id="ask"></div>
-    <h2>Execution timeline</h2>
-    <div id="timeline" class="muted">Start a task to see the agent work.</div>
+  <div class="col center">
+    <div class="map"><h2>Run</h2><svg id="map" role="img" aria-label="Apps visited in this run"></svg>
+      <div class="legend"><span>Agent</span><span class="ver">Independent check</span></div></div>
+    <div class="timeline" id="timeline"><div class="empty">Pick an example or write a task, then run it.</div></div>
   </div>
-  <div class="panel">
-    <h2>Live browser</h2>
-    <img id="shot" class="shot" alt="latest screenshot" style="display:none">
-    <div id="shotcap" class="muted" style="font-size:12px;margin:4px 0 12px"></div>
-    <h2>Plan</h2><div id="plan" class="muted">-</div>
-    <h2 style="margin-top:12px">Working memory</h2><div id="memory" class="kv muted">-</div>
-    <h2 style="margin-top:12px">Result</h2><div id="result" class="muted">-</div>
-    <h2 style="margin-top:12px">Learned playbook</h2><div id="playbook" class="muted" style="font-size:12px">-</div>
+  <div class="col">
+    <div class="sec"><h2>What the agent sees</h2>
+      <div class="browser"><div class="urlbar"><span class="mono" id="url">no page yet</span></div>
+        <div class="shotwrap"><img id="shot" alt="Latest screenshot" hidden><span class="tag" id="tag" hidden></span></div>
+        <div class="caption" id="caption">Screenshots appear here as the agent works.</div></div>
+    </div>
+    <div class="sec facts"><h2>Facts it has written down</h2><div id="facts" class="muted" style="font-size:13px">None yet.</div></div>
+    <div class="sec criteria"><h2>Done means</h2><div id="criteria" class="muted" style="font-size:13px">The plan's success criteria appear here.</div></div>
+    <div class="sec result"><h2>Result</h2><div id="result" class="muted" style="font-size:13px">No result yet.</div></div>
   </div>
 </div>
+<div class="scrim" id="scrim"></div>
+<div class="card" id="card" role="dialog" aria-modal="true" aria-labelledby="cardTitle"></div>
 <script>
-// SECURITY: everything shown here (page text, emails, LLM output, tool args) is untrusted.
-// It is only ever inserted with textContent via el(); innerHTML is never used.
+// SECURITY: everything shown here (page text, emails, model output, tool arguments) is untrusted.
+// It is only ever inserted with createElement/textContent via el(); innerHTML is never used.
 const TOKEN = document.querySelector('meta[name="autowork-token"]').content;
+const SVG = 'http://www.w3.org/2000/svg';
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const PRESETS = [
   "Find the latest invoice from Acme, extract the amount and due date, enter it into our ERP, and tell me once it is done.",
   "Enter the Globex invoice from my email into the ERP.",
@@ -86,97 +238,371 @@ const PRESETS = [
   "Enter all bills from q3_expenses.csv in the workspace into the ERP, skipping any that already exist.",
   "Pay the latest Acme invoice in the ERP.",
   "Which open ERP bill is due soonest? Write a short summary of all open bills to open_bills.md in the workspace.",
+  "Triage all new tickets in the IT helpdesk according to it_policy.md in the workspace.",
+  "Find the CFO's helpdesk ticket about their laptop and post a status comment summarizing the latest update.",
+  "Handle helpdesk ticket HD-1047.",
+  "Handle helpdesk ticket HD-1037.",
 ];
-const STATUSES = new Set(['verified','unverified','failed','needs_user','budget_exhausted','error','running']);
+// Run status -> label and pill colour (the only other pills are criteria results)
+const STATUS = {
+  running:['Running','run'], verified:['Verified','ok'], unverified:['Not verified','wait'],
+  failed:['Failed','bad'], needs_user:['Needs you','wait'], budget_exhausted:['Out of budget','bad'],
+  no_progress:['Stopped: no progress','bad'], plan_failed:['No valid plan','bad'], stopped:['Stopped','neutral'],
+  error:['Error','bad'], waiting:['Waiting for you','wait'],
+};
 const $ = id => document.getElementById(id);
 function el(tag, cls, ...kids){
   const e = document.createElement(tag); if (cls) e.className = cls;
-  for (const k of kids) { if (k == null) continue; e.append(k instanceof Node ? k : document.createTextNode(String(k))); }
+  for (const k of kids){ if (k == null || k === false) continue; e.append(k instanceof Node ? k : document.createTextNode(String(k))); }
   return e;
 }
-const badge = st => el('span', 'badge ' + (STATUSES.has(st) ? st : 'error'), st);
-const clear = (id, placeholder) => { const n=$(id); n.replaceChildren(); if (placeholder!==undefined){ n.append(placeholder); n.classList.add('muted'); } else n.classList.remove('muted'); return n; };
-const api = (url, opts={}) => fetch(url, {...opts, headers: {'Content-Type':'application/json','X-AutoWork-Token':TOKEN, ...(opts.headers||{})}});
-PRESETS.forEach(p => { const b = el('button','ghost preset',p); b.onclick=()=>$('task').value=p; $('presets').append(b); });
-let es, runId;
-
-function add(cls, kind, ...body){
-  const t=$('timeline'); if (t.classList.contains('muted')) clear('timeline');
-  t.append(el('div','ev '+cls, el('div','k',kind), ...body)); $('timelinePanel').scrollTop=1e9;
+function svg(tag, attrs){ const e = document.createElementNS(SVG, tag); for (const [k,v] of Object.entries(attrs||{})) e.setAttribute(k, v); return e; }
+const pill = st => { const [label, cls] = STATUS[st] || [String(st), 'neutral']; return el('span', 'pill ' + cls, label); };
+const api = (url, opts={}) => fetch(url, {...opts, headers:{'Content-Type':'application/json','X-AutoWork-Token':TOKEN, ...(opts.headers||{})}});
+const short = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+const urlOf = text => { const m = /^URL: (\S+)/.exec(text || ''); return m ? m[1] : null; };
+const titleOf = text => { const m = /\nTITLE: ([^\n]*)/.exec(text || ''); return m ? m[1] : ''; };
+function errLine(text){ // the first informative line of a failed observation
+  const lines = String(text || '').split('\n').map(x => x.trim()).filter(Boolean);
+  return lines.find(l => /^ERROR|HTTP STATUS|ALERTS ON PAGE|UNSOURCED|LABEL CONFLICT|BLOCKED|DENIED/.test(l)) || lines[0] || 'failed';
 }
-function details(summary, full){ const d=el('details',null, el('summary',null,summary)); d.append(full); return d; }
-function shot(p, cap){ if(!p) return; $('shot').src='/files/'+encodeURI(p); $('shot').style.display='block'; $('shotcap').textContent=cap||''; }
-$('shot').onclick=()=>window.open($('shot').src);
-const list = (tag, items) => { const l=el(tag); (items||[]).forEach(x=>l.append(el('li',null,x))); return l; };
-
-function handle(e){
-  const d=e.data;
-  switch(e.type){
-    case 'start': clear('status').append(badge('running'), ` ${d.model} · ${d.mode}`); add('plan','start',d.task); break;
-    case 'plan':
-      clear('plan').append(el('b',null,d.goal), list('ol',d.plan), el('div','muted','Success criteria:'), list('ul',d.success_criteria));
-      add('plan','plan', d.goal, (d.assumptions||[]).length ? el('div','muted','Assumptions: '+d.assumptions.join('; ')) : null); break;
-    case 'thought': add('thought',`step ${d.step} · reasoning`, d.text); break;
-    case 'action': add('action',`step ${d.step} · action`, el('b',null,d.tool), ' ', d.args); break;
-    case 'observation':
-      add(d.ok?'obs-ok':'obs-bad', d.ok?'observation':'observation · failed', details(d.text.split('\n').slice(0,3).join('\n'), d.text));
-      shot(d.screenshot, `step ${d.step} · ${d.tool}`); break;
-    case 'memory': { const m=clear('memory'); Object.entries(d).forEach(([k,v])=>m.append(el('b',null,k), el('span',null,v))); break; }
-    case 'policy': add('policy','policy gate', `${d.verdict}: ${d.reason}`); break;
-    case 'human_request': add('human_request','asking human · '+d.kind, d.question); if(d.screenshot) shot(d.screenshot,'page awaiting approval'); break;
-    case 'waiting_for_human': showAsk(d); break;
-    case 'human_response': $('ask').style.display='none'; add('human_response','human answered', d.answer ?? ((d.approved?'APPROVED':'DENIED')+(d.comment?': '+d.comment:''))); break;
-    case 'warning': case 'error': case 'llm_retry': add(e.type, e.type, (d.message||'') + (d.reason ? '\n'+d.reason : '')); break;
-    case 'verify_start': add('verify','independent verification','Auditor (fresh context, read-only browser) is checking the real system state…'); break;
-    case 'verify_step': add('verify','auditor · '+d.tool, details(d.args, d.text)); shot(d.screenshot,'auditor view'); break;
-    case 'verify_result': add('verify', d.passed?'verification PASSED':'verification FAILED', d.reason+'\n'+(d.evidence||[]).join('\n')); break;
-    case 'learned': add('plan','learned for next time', (d.notes||[]).join('\n')); loadPlaybook(); break;
-    case 'final':
-      clear('status').append(badge(d.status), ` ${d.steps} steps · ${d.duration_s}s · ${d.llm.calls} LLM calls`);
-      clear('result').append(badge(d.status), el('p',null,d.summary), list('ul',d.evidence), d.verification ? el('div','muted','Audit: '+d.verification.reason) : null);
-      add('final','final · '+d.status, d.summary); $('go').disabled=false; loadRuns(); break;
-  }
+function okLine(tool, text){
+  const u = urlOf(text);
+  if (u) { const t = titleOf(text); return t ? `${t}` : u; }
+  return short(String(text || '').split('\n')[0], 140);
 }
-function showAsk(d){
-  const a=$('ask'); a.replaceChildren(); a.style.display='block';
-  a.append(el('h3',null, d.kind==='approval' ? 'Approval required' : 'The agent needs your input'), el('div','pre', d.question));
-  if (d.kind==='approval'){
-    const cmt=el('input'); cmt.type='text'; cmt.placeholder='optional comment'; cmt.style.margin='8px 0';
-    const yes=el('button',null,'Approve'), no=el('button','ghost','Deny');
-    yes.onclick=()=>respond({qid:d.qid,approved:true,comment:cmt.value});
-    no.onclick=()=>respond({qid:d.qid,approved:false,comment:cmt.value});
-    a.append(cmt, el('div','row',yes,no));
+
+// ---------------------------------------------------------------- state
+let es = null, runId = null, live = false, apps = [], startT = null, endT = null, tick = null;
+let lastStepEl = null, pendingErr = null, currentUrl = null, factSource = {}, criteriaRows = new Map();
+let stations = [], edges = [], lastStation = {agent:null, auditor:null}, errStations = new Set();
+let pendingRequest = null, model = '';
+
+const MODE_HINT = {balanced: 'Asks you before irreversible actions such as payments.',
+  supervised: 'Asks you before every change to data.', autonomous: 'Never asks. Blocked actions stay blocked.'};
+const modeHint = () => { $('modeHint').textContent = MODE_HINT[$('mode').value]; };
+$('mode').onchange = modeHint; modeHint();
+PRESETS.forEach(p => { const b = el('button', null, p); b.onclick = () => { $('task').value = p; $('task').focus(); }; $('presets').append(b); });
+fetch('/api/world').then(r => r.json()).then(w => { apps = (w.apps || []).sort((a,b) => b.path.length - a.path.length); }).catch(() => {});
+
+// ---------------------------------------------------------------- header + phase rail
+const PHASES = [['plan','Plan'],['work','Work'],['verify','Independent check'],['done','Done']];
+function rail(active, waiting, finalStatus){
+  const r = $('rail'); r.replaceChildren();
+  const idx = PHASES.findIndex(p => p[0] === active);
+  PHASES.forEach(([key, label], i) => {
+    const cls = i < idx || (active === 'done' && i === idx) ? 'done' : i === idx ? (waiting ? 'active waiting' : 'active') : '';
+    if (i) r.append(el('div', 'bar' + (i <= idx ? ' done' : '')));
+    r.append(el('div', 'phase ' + cls, el('span', 'dot'), label));
+  });
+  if (finalStatus) r.append(el('span', 'note', pill(finalStatus)));
+  else if (waiting) r.append(el('span', 'note', pill('waiting')));
+}
+let phase = null, waiting = false, finalStatus = null;
+function setPhase(p){ phase = p; rail(phase, waiting, finalStatus); }
+function meta(d){
+  const m = $('meta'); m.replaceChildren();
+  m.append(pill(d.status), el('span', null, 'Model ', el('span', 'mono', d.model || '')), el('span', null, 'Mode ', el('b', null, d.mode || '')),
+           el('span', null, 'Elapsed ', el('b', null, d.elapsed || '0s')));
+  if (d.tokens) m.append(el('span', null, el('b', null, d.tokens)));
+  m.append(el('span', 'mono muted', d.run));
+}
+let headerState = {};
+function header(patch){ headerState = {...headerState, ...patch}; meta(headerState); }
+function fmtElapsed(s){ s = Math.max(0, Math.round(s)); return s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${String(s%60).padStart(2,'0')}s`; }
+function startClock(t){ startT = t; endT = null; clearInterval(tick); if (live) tick = setInterval(() => header({elapsed: fmtElapsed(Date.now()/1000 - startT)}), 1000); }
+
+// ---------------------------------------------------------------- run map (stations from real URLs)
+function stationOf(url){
+  try {
+    const u = new URL(url); const path = u.pathname;
+    const a = apps.find(a => path === a.path || path.startsWith(a.path.replace(/\/$/, '') + '/'));
+    if (a) return {key: a.name, label: a.name, about: a.about};
+    return {key: u.host + (path === '/' ? '' : path.split('/').slice(0,2).join('/')), label: path === '/' ? 'start page' : path.split('/')[1], about: url};
+  } catch { return null; }
+}
+function visit(st, who, error){
+  if (!st) return;
+  if (!stations.find(s => s.key === st.key)) stations.push(st);
+  const prev = lastStation[who];
+  if (prev && prev !== st.key && !edges.find(e => e.from === prev && e.to === st.key && e.who === who)) edges.push({from: prev, to: st.key, who, fresh: true});
+  lastStation[who] = st.key;
+  if (error) errStations.add(st.key); else if (who === 'agent') errStations.delete(st.key);
+  drawMap();
+}
+function drawMap(){
+  const m = $('map'); m.replaceChildren();
+  const W = m.clientWidth || 600, H = 120, y = 62;
+  if (!stations.length){ const t = svg('text', {x: 0, y: 60, fill: '#5f5e61', 'font-size': 13}); t.textContent = 'The apps the agent visits appear here.'; m.append(t); return; }
+  const n = stations.length, x = i => n === 1 ? W/2 : 40 + i * ((W - 80) / (n - 1));
+  const pos = Object.fromEntries(stations.map((s, i) => [s.key, x(i)]));
+  m.append(svg('line', {x1: x(0), x2: x(n-1), y1: y, y2: y, stroke: '#e4e2dd', 'stroke-width': 2}));
+  edges.forEach(e => {
+    const x1 = pos[e.from], x2 = pos[e.to]; if (x1 == null || x2 == null) return;
+    const up = e.who === 'agent' ? -1 : 1, h = Math.min(34, 14 + Math.abs(x2 - x1) / 10);
+    const p = svg('path', {d: `M ${x1} ${y} Q ${(x1+x2)/2} ${y + up*h*2} ${x2} ${y}`, class: 'edge ' + (e.who === 'auditor' ? 'verifier' : 'agent'),
+                           stroke: e.who === 'agent' ? '#1b1c19' : '#5f5e61'});
+    m.append(p);
+    if (e.who === 'agent'){
+      const len = Math.ceil(p.getTotalLength ? p.getTotalLength() : 300); p.style.setProperty('--len', len);
+      if (!e.fresh || REDUCED || !live) { p.style.animation = 'none'; p.style.strokeDasharray = 'none'; }
+    }
+    e.fresh = false;
+  });
+  stations.forEach(s => {
+    const cx = pos[s.key], here = live && s.key === lastStation.agent && phase === 'work', err = errStations.has(s.key);
+    const c = svg('circle', {cx, cy: y, r: here ? 8 : 6, fill: here ? '#cc4900' : '#fbf9f4', stroke: err ? '#ba1a1a' : here ? '#cc4900' : '#1b1c19', 'stroke-width': 3});
+    const t = svg('title'); t.textContent = s.about || s.label; c.append(t); m.append(c);
+    if (err) m.append(svg('line', {x1: cx + 10, x2: cx + 10, y1: y - 9, y2: y + 9, stroke: '#ba1a1a', 'stroke-width': 3}));
+    const lab = svg('text', {x: cx, y: 16, 'text-anchor': 'middle', 'font-size': 13, fill: '#1b1c19'}); lab.textContent = s.label; m.append(lab);
+  });
+}
+window.addEventListener('resize', drawMap);
+
+// ---------------------------------------------------------------- timeline
+function relT(t){ return startT ? `+${fmtElapsed(t - startT)}` : ''; }
+function push(node){
+  const tl = $('timeline'); const empty = tl.querySelector('.empty'); if (empty) empty.remove();
+  if (live && !REDUCED) node.classList.add('fade-in');
+  tl.append(node);
+  if (live) tl.scrollTop = tl.scrollHeight;
+  return node;
+}
+function note(text, cls){ return push(el('div', 'note-row' + (cls ? ' ' + cls : ''), text)); }
+function stepItem(d, t, who){
+  if (lastStepEl) { lastStepEl.classList.remove('current'); lastStepEl.classList.add('past'); }
+  const head = el('div', 'head', el('span', 'tool', d.tool), el('span', 'args', short(d.args, 160)), el('span', 'when', relT(t)));
+  const node = el('div', 'step' + (who === 'auditor' ? ' auditor' : ''), head);
+  if (live && who === 'agent') node.classList.add('current');
+  lastStepEl = node; return push(node);
+}
+let pendingThought = '';
+function onAction(d, t){
+  const node = stepItem(d, t, 'agent');
+  if (pendingThought) { node.append(el('div', 'why', pendingThought)); pendingThought = ''; }
+  node.dataset.tool = d.tool; node.dataset.args = d.raw_args || d.args || '';
+  if (d.tool === 'remember') { try { const a = JSON.parse(d.raw_args || d.args); if (a.key) factSource[a.key] = currentUrl; } catch {} }
+  if (d.tool === 'browser_click' || d.tool === 'browser_fill') targetTag(d); else $('tag').hidden = true;
+}
+function onObservation(d, t){
+  const node = lastStepEl; if (!node) return;
+  const u = urlOf(d.text); if (u) currentUrl = u;
+  if (d.ok){
+    node.append(el('div', 'out', okLine(d.tool, d.text)));
+    if (pendingErr && pendingErr !== node){
+      const errNode = pendingErr; node.classList.add('recovered');
+      const link = el('button', 'link', 'Continued after the error above'); link.onclick = () => { errNode.scrollIntoView({block: 'center'}); errNode.classList.add('hl'); setTimeout(() => errNode.classList.remove('hl'), 900); };
+      node.append(link); pendingErr = null;
+    }
   } else {
-    const opts=el('div','row'); (d.options||[]).forEach(o=>{const b=el('button','ghost',o); b.onclick=()=>respond({qid:d.qid,answer:o}); opts.append(b)});
-    const ans=el('input'); ans.type='text'; ans.placeholder='your answer';
-    const send=el('button',null,'Send'); send.onclick=()=>respond({qid:d.qid,answer:ans.value});
-    a.append(opts, ans, el('div','row',send));
+    node.append(el('div', 'out bad', errLine(d.text)));
+    node.classList.add('err'); if (live && !REDUCED) node.classList.add('flash');
+    pendingErr = node;
   }
-  a.scrollIntoView();
+  const det = el('details', null, el('summary', null, 'Full observation')); det.append(el('pre', null, d.text)); node.append(det);
+  if (u) visit(stationOf(u), 'agent', !d.ok);
+  if (d.screenshot) showShot(d.screenshot, u, `After ${d.tool}`);
 }
-async function respond(body){ await api(`/api/runs/${encodeURIComponent(runId)}/answer`,{method:'POST',body:JSON.stringify(body)}); }
-function watch(id){
-  runId=id; if(es) es.close();
-  ['timeline','plan','memory','result'].forEach(x=>clear(x,'-')); $('shot').style.display='none';
-  es=new EventSource(`/api/runs/${encodeURIComponent(id)}/events`); es.onmessage=m=>handle(JSON.parse(m.data)); es.onerror=()=>es.close();
+function targetTag(d){
+  let ids = [];
+  try { const a = JSON.parse(d.raw_args || d.args); if (a.element_id != null) ids = [a.element_id]; else if (Array.isArray(a.fields)) ids = a.fields.map(f => f.element_id); } catch {}
+  const tag = $('tag'); if (!ids.length) { tag.hidden = true; return; }
+  tag.textContent = ids.map(i => `[${i}]`).join(' ') + (d.tool === 'browser_click' ? ' clicked' : ' filled'); tag.hidden = false;
 }
-$('go').onclick=async()=>{
-  const faults={acme_login_flaky:$('f1').checked, erp_submit_timeout:$('f2').checked, erp_session_expiry:$('f3').checked?3:0};
-  $('go').disabled=true;
-  const r=await api('/api/runs',{method:'POST',body:JSON.stringify({task:$('task').value,mode:$('mode').value,use_playbook:$('pb').checked,reset_world:$('reset').checked,faults})});
-  const j=await r.json(); if(!r.ok){alert(typeof j.detail==='string'?j.detail:JSON.stringify(j.detail));$('go').disabled=false;return} watch(j.run_id);
+function showShot(path, url, caption){
+  const img = $('shot'); img.src = '/files/' + encodeURI(path); img.hidden = false;
+  if (url) $('url').textContent = url; $('caption').textContent = caption || '';
+}
+$('shot').onclick = () => window.open($('shot').src);
+
+// ---------------------------------------------------------------- facts, criteria, result
+function onMemory(d){
+  const box = $('facts'); box.replaceChildren(); box.classList.remove('muted');
+  const entries = Object.entries(d || {});
+  if (!entries.length) { box.append('None yet.'); box.classList.add('muted'); return; }
+  entries.forEach(([k, v]) => box.append(el('div', 'fact', el('div', 'k', k), el('div', 'v', v),
+    factSource[k] ? el('div', 'src', 'from ' + factSource[k]) : null)));
+}
+function onPlan(d){
+  const box = $('criteria'); box.replaceChildren(); box.classList.remove('muted'); criteriaRows = new Map();
+  const ul = el('ul');
+  (d.success_criteria || []).forEach(c => ul.append(criterionRow(c)));
+  box.append(ul);
+  note('Plan: ' + (d.goal || ''));
+}
+function criterionRow(text){
+  const p = el('span', 'pill neutral', 'Not checked');
+  const li = el('li', null, el('span', 'txt', text), p); criteriaRows.set(text.trim().toLowerCase(), {li, p}); return li;
+}
+let auditItems = [];
+function onChecklist(d){
+  auditItems = (d.items || []).map(s => { const m = /^(C\d+) \[(\w+)\]: (.*)$/s.exec(s) || /^(C\d+): (.*)$/s.exec(s); return m ? {id: m[1], kind: m.length === 4 ? m[2] : '', text: m[m.length - 1]} : null; }).filter(Boolean);
+  const extra = auditItems.filter(i => !criteriaRows.has(i.text.trim().toLowerCase()));
+  if (extra.length){
+    const box = $('criteria'); box.append(el('div', 'sub', 'The independent check also compares'));
+    const ul = el('ul'); extra.forEach(i => ul.append(criterionRow(i.text))); box.append(ul);
+  }
+  const where = (d.source_apps || []).length ? ` (true values in: ${d.source_apps.join(', ')})` : '';
+  note(`Independent check: ${auditItems.length} things to compare${where}`);
+}
+function evidenceOf(c){
+  if (!c) return '';
+  if (c.record_id || c.source_id) return `record ID ${c.record_id ?? '?'}, source maps to ID ${c.source_id ?? '?'} via ${c.source_key ?? '?'}`;
+  if (c.record_value || c.source_value) return `record ${c.record_value ?? ''} · source ${c.source_value ?? ''}`;
+  return '';
+}
+function onVerdict(d){
+  const checks = Object.fromEntries((d.checks || []).map(c => [String(c.id || '').toUpperCase(), c]));
+  const rows = auditItems.map(i => ({i, c: checks[i.id], row: criteriaRows.get(i.text.trim().toLowerCase())})).filter(x => x.row);
+  rows.forEach((x, n) => setTimeout(() => {
+    const {p, li} = x.row;
+    if (!x.c) { p.className = 'pill neutral'; p.textContent = 'Not checked'; }
+    else if (x.c.ok === true) { p.className = 'pill ok'; p.textContent = 'Met'; }
+    else { p.className = 'pill bad'; p.textContent = 'Not met'; }
+    const ev = evidenceOf(x.c); if (ev && !li.querySelector('.ev')) li.querySelector('.txt').append(el('span', 'ev', ev));
+  }, live && !REDUCED ? n * 220 : 0));
+  const box = push(el('div', 'step auditor', el('div', 'head', el('span', 'tool', 'verdict'), d.passed ? pill('verified') : pill('unverified'), el('span', 'when', '')),
+    el('div', 'out' + (d.passed ? '' : ' bad'), d.reason || '')));
+  if (d.source) box.append(el('div', 'why', 'Source opened: ', el('span', 'mono', d.source)));
+}
+function onFinal(d){
+  finalStatus = d.status; waiting = false; live = false; clearInterval(tick);
+  setPhase('done'); closeCard(); $('stop').hidden = true; $('go').disabled = false;
+  if (lastStepEl) { lastStepEl.classList.remove('current'); }
+  const llm = d.llm || {}, v = llm.verifier || {};
+  const tokens = (llm.prompt_tokens || 0) + (llm.completion_tokens || 0) + (v.prompt_tokens || 0) + (v.completion_tokens || 0);
+  header({status: d.status, elapsed: fmtElapsed(d.duration_s || 0), tokens: tokens ? `${(tokens/1000).toFixed(1)}k tokens` : null});
+  const r = $('result'); r.replaceChildren(); r.classList.remove('muted');
+  r.append(pill(d.status), el('p', null, d.summary));
+  if ((d.evidence || []).length){ const ul = el('ul'); d.evidence.forEach(x => ul.append(el('li', null, x))); r.append(ul); }
+  if (d.verification && d.verification.reason) r.append(el('p', 'muted', 'Independent check: ' + d.verification.reason));
+  r.append(el('p', 'muted', `${d.steps} steps · ${llm.calls || 0} model calls`));
+  drawMap(); loadRuns();
+}
+
+// ---------------------------------------------------------------- approvals and questions
+function onHumanRequest(d){
+  pendingRequest = d;
+  note((d.kind === 'approval' ? 'Asked for approval: ' : 'Asked: ') + short(d.question, 220), d.kind === 'approval' ? 'ask' : null);
+}
+function onWaiting(d){
+  waiting = true; rail(phase, waiting, null); header({status: 'waiting'});
+  const req = pendingRequest || {}; const card = $('card'); card.replaceChildren();
+  card.classList.toggle('question', d.kind !== 'approval');
+  if (d.kind === 'approval'){
+    const act = req.action || {};
+    const verb = act.label ? `Approve "${short(act.label, 40)}"` : act.request ? `Approve ${short(act.request, 40)}` : 'Approve';
+    card.append(el('h3', null, 'Approval needed'), el('div', 'q', d.question));
+    const kv = el('div', 'kv');
+    if (act.url) kv.append(el('span', 'k', 'Page'), el('span', 'mono', act.url));
+    if (act.request) kv.append(el('span', 'k', 'Request'), el('span', 'mono', act.request));
+    if (act.page_fingerprint) kv.append(el('span', 'k', 'Page state'), el('span', 'mono', act.page_fingerprint));
+    if (kv.childNodes.length) card.append(kv);
+    if (req.screenshot) { const img = el('img'); img.src = '/files/' + encodeURI(req.screenshot); img.alt = 'The page awaiting approval'; card.append(img); }
+    if (act.page_fingerprint) card.append(el('div', 'muted', 'Your approval applies to this page state only. If the page changes first, you are asked again.'));
+    const cmt = el('input'); cmt.type = 'text'; cmt.placeholder = 'Comment (optional)';
+    const yes = el('button', 'btn approve', verb), no = el('button', 'btn', 'Decline');
+    yes.onclick = () => respond({qid: d.qid, approved: true, comment: cmt.value});
+    no.onclick = () => respond({qid: d.qid, approved: false, comment: cmt.value});
+    card.append(el('div', 'row', cmt), el('div', 'row', yes, no));
+    setTimeout(() => yes.focus(), 50);
+  } else {
+    card.append(el('h3', null, 'The agent asks'), el('div', 'q', d.question));
+    const opts = el('div', 'row'); (d.options || []).forEach(o => { const b = el('button', 'btn', o); b.onclick = () => respond({qid: d.qid, answer: o}); opts.append(b); });
+    const ans = el('input'); ans.type = 'text'; ans.placeholder = 'Your answer';
+    const send = el('button', 'btn primary', 'Send'); send.onclick = () => respond({qid: d.qid, answer: ans.value});
+    if ((d.options || []).length) card.append(opts);
+    card.append(el('div', 'row', ans), el('div', 'row', send));
+  }
+  if (live) { $('scrim').classList.add('on'); card.classList.add('on'); }
+}
+function closeCard(){ $('scrim').classList.remove('on'); $('card').classList.remove('on'); }
+async function respond(body){ await api(`/api/runs/${encodeURIComponent(runId)}/answer`, {method: 'POST', body: JSON.stringify(body)}); }
+function onHumanResponse(d){
+  waiting = false; closeCard(); rail(phase, false, null); if (live) header({status: 'running'});
+  const text = d.answer != null ? `You answered: ${d.answer || '(no text)'}` : (d.approved ? 'You approved' : 'You declined') + (d.comment ? `: ${d.comment}` : '');
+  note(text, d.answer != null ? null : 'ask'); pendingRequest = null;
+}
+
+// ---------------------------------------------------------------- event dispatch
+function handle(e){
+  const d = e.data || {}, t = e.t;
+  switch (e.type){
+    case 'start':
+      model = d.model; startClock(t);
+      header({status: 'running', model: d.model, mode: d.mode, run: d.run_id, elapsed: '0s', tokens: null});
+      setPhase('plan'); note('Task: ' + d.task); break;
+    case 'plan': onPlan(d); setPhase('work'); break;
+    case 'thought': if (d.text) pendingThought = short(d.text, 400); break;
+    case 'action': if (phase !== 'work') setPhase('work'); onAction(d, t); break;
+    case 'observation': onObservation(d, t); break;
+    case 'memory': onMemory(d); break;
+    case 'policy': if (d.verdict === 'deny') note('Blocked by policy: ' + d.reason, 'err'); break;
+    case 'human_request': onHumanRequest(d); break;
+    case 'waiting_for_human': onWaiting(d); break;
+    case 'human_response': onHumanResponse(d); break;
+    case 'llm_retry': {
+      note(d.message || 'Retrying the model call');
+      const m = /switching to fallback model (\S+)/.exec(d.message || ''); if (m) header({model: m[1]});
+      break; }
+    case 'warning': note((d.message || '') + (d.reason ? ' ' + d.reason : '')); break;
+    case 'error': note('Error: ' + (d.message || ''), 'err'); break;
+    case 'verify_start': setPhase('verify'); if (lastStepEl) { lastStepEl.classList.remove('current'); lastStepEl.classList.add('past'); }
+      push(el('div', 'divider', 'Independent check: a separate, read-only auditor compares the result with the source')); break;
+    case 'verify_checklist': onChecklist(d); break;
+    case 'verify_step': {
+      const node = stepItem({tool: d.tool, args: d.args}, t, 'auditor');
+      const u = urlOf(d.text); node.append(el('div', 'out' + (d.ok ? '' : ' bad'), d.ok ? okLine(d.tool, d.text) : errLine(d.text)));
+      if (u) visit(stationOf(u), 'auditor', false);
+      if (d.screenshot) showShot(d.screenshot, u, 'What the independent check sees');
+      break; }
+    case 'verify_result': onVerdict(d); break;
+    case 'learned': note('Learned for next time: ' + (d.notes || []).join(' · ')); loadPlaybook(); break;
+    case 'final': onFinal(d); break;
+  }
+}
+
+// ---------------------------------------------------------------- runs
+function resetView(){
+  ['timeline'].forEach(id => $(id).replaceChildren(el('div', 'empty', 'Waiting for the first event…')));
+  $('facts').replaceChildren('None yet.'); $('facts').classList.add('muted');
+  $('criteria').replaceChildren('The plan\'s success criteria appear here.'); $('criteria').classList.add('muted');
+  $('result').replaceChildren('No result yet.'); $('result').classList.add('muted');
+  $('shot').hidden = true; $('tag').hidden = true; $('url').textContent = 'no page yet'; $('caption').textContent = '';
+  lastStepEl = null; pendingErr = null; currentUrl = null; factSource = {}; criteriaRows = new Map(); auditItems = [];
+  stations = []; edges = []; lastStation = {agent: null, auditor: null}; errStations = new Set(); pendingRequest = null; pendingThought = '';
+  phase = null; waiting = false; finalStatus = null; headerState = {}; closeCard(); drawMap();
+}
+function watch(id, isLive){
+  runId = id; live = !!isLive; if (es) es.close(); resetView();
+  $('stop').hidden = !live;
+  es = new EventSource(`/api/runs/${encodeURIComponent(id)}/events`);
+  es.onmessage = m => handle(JSON.parse(m.data));
+  es.onerror = () => es.close();
+}
+$('go').onclick = async () => {
+  const faults = {acme_login_flaky: $('f1').checked, erp_submit_timeout: $('f2').checked, erp_session_expiry: $('f3').checked ? 3 : 0};
+  $('go').disabled = true;
+  const r = await api('/api/runs', {method: 'POST', body: JSON.stringify({task: $('task').value, mode: $('mode').value, use_playbook: $('pb').checked,
+    reset_world: $('reset').checked, max_run_tokens: Number($('cap').value) || 0, faults})});
+  const j = await r.json();
+  if (!r.ok) { alert(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)); $('go').disabled = false; return; }
+  watch(j.run_id, true);
 };
-$('clearpb').onclick=async()=>{await api('/api/playbook',{method:'DELETE'}); loadPlaybook()};
+$('stop').onclick = async () => { $('stop').disabled = true; await api(`/api/runs/${encodeURIComponent(runId)}/stop`, {method: 'POST'}); $('stop').disabled = false; };
+$('clearpb').onclick = async () => { await api('/api/playbook', {method: 'DELETE'}); loadPlaybook(); };
 async function loadRuns(){
-  const r=await (await fetch('/api/runs')).json(); const box=clear('runs');
-  if(!r.length){ box.append(el('span','muted','none')); return; }
-  r.forEach(x=>{ const a=el('a',null,badge(x.status),' ',x.task.slice(0,60)); a.href='#'; a.onclick=ev=>{ev.preventDefault();watch(x.run_id)}; box.append(a); });
+  const r = await (await fetch('/api/runs')).json(); const box = $('runs'); box.replaceChildren();
+  if (!r.length) { box.append(el('div', 'muted', 'No runs yet.')); return; }
+  r.forEach(x => { const a = el('a', null, pill(x.status), el('span', 't', x.task || x.run_id)); a.href = '#'; a.title = x.run_id;
+    a.onclick = ev => { ev.preventDefault(); watch(x.run_id, x.status === 'running'); }; box.append(a); });
 }
 async function loadPlaybook(){
-  const p=await (await fetch('/api/playbook')).json();
-  if(p.length) clear('playbook').append(list('ul',p.map(n=>n.note))); else clear('playbook','(empty: notes appear after a verified run)');
+  const p = await (await fetch('/api/playbook')).json(); const box = $('playbook'); box.replaceChildren();
+  if (!p.length) { box.append(el('div', 'muted', 'Empty. Notes are added after a verified run, when the playbook is on.')); return; }
+  const ul = el('ul'); p.forEach(n => ul.append(el('li', null, n.note))); box.append(ul);
 }
-loadRuns(); loadPlaybook();
+rail(null, false, null); drawMap(); loadRuns(); loadPlaybook();
 </script>
 </body>
 </html>

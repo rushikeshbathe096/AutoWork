@@ -1,4 +1,4 @@
-"""Simulated company environment: webmail, a vendor billing portal, and an internal ERP.
+"""Simulated company environment: webmail, a vendor billing portal, an internal ERP and an IT helpdesk.
 
 These are real server-rendered web apps the agent drives through a real browser.
 Faults can be injected via /admin/faults to exercise the agent's recovery logic:
@@ -6,6 +6,7 @@ Faults can be injected via /admin/faults to exercise the agent's recovery logic:
   acme_login_flaky    first Acme login attempt returns 503
   erp_submit_timeout  first successful bill submit is SAVED but responds 504 (ambiguous outcome)
   erp_session_expiry  ERP session dies after N authenticated page views
+  helpdesk_*          see simworld/helpdesk.py
 """
 
 from __future__ import annotations
@@ -17,14 +18,25 @@ import secrets
 from datetime import date, datetime
 
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from . import db
 
 app = FastAPI(title="OurCo simulated world")
 
-CREDENTIALS = {"acme": ("ourco-ap", "Acme!2026"), "erp": ("ap.clerk", "ledger-42")}
-FAULTS: dict = {"acme_login_flaky": False, "erp_submit_timeout": False, "erp_session_expiry": 0}
+CREDENTIALS = {
+    "acme": ("ourco-ap", "Acme!2026"),
+    "erp": ("ap.clerk", "ledger-42"),
+    "helpdesk": (db.HD_SERVICE_ACCOUNT, "Desk#2026"),
+}
+NO_FAULTS = {
+    "acme_login_flaky": False,
+    "erp_submit_timeout": False,
+    "erp_session_expiry": 0,
+    "helpdesk_session_expiry": 0,
+    "helpdesk_submit_timeout": False,
+}
+FAULTS: dict = dict(NO_FAULTS)
 _fault_state: dict = {}
 SESSIONS: dict[str, dict] = {}
 
@@ -49,7 +61,7 @@ def money(cents: int, cur: str) -> str:
 
 
 def page(title: str, body: str, brand: str, nav: str = "", status: int = 200) -> HTMLResponse:
-    colors = {"mail": "#2563eb", "acme": "#b45309", "erp": "#047857", "err": "#b91c1c"}
+    colors = {"mail": "#2563eb", "acme": "#b45309", "erp": "#047857", "helpdesk": "#6d28d9", "err": "#b91c1c"}
     c = colors.get(brand, "#334155")
     return HTMLResponse(
         f"""<!doctype html><html><head><meta charset="utf-8"><title>{esc(title)}</title>
@@ -75,7 +87,7 @@ pre{{white-space:pre-wrap;background:#f1f5f9;padding:12px;border-radius:4px}}
 @app.post("/admin/reset", dependencies=[Depends(require_admin)])
 def admin_reset(faults: dict | None = None):
     db.reset()
-    FAULTS.update({"acme_login_flaky": False, "erp_submit_timeout": False, "erp_session_expiry": 0})
+    FAULTS.update(NO_FAULTS)
     if faults:
         FAULTS.update(faults)
     _fault_state.clear()
@@ -90,6 +102,26 @@ def admin_faults(faults: dict):
     return FAULTS
 
 
+@app.get("/admin/snapshot", dependencies=[Depends(require_admin)])
+def admin_snapshot():
+    """The world's database file, saved with each run so its auditor can be replayed (evals/reverify.py)."""
+    return Response(db.snapshot(), media_type="application/vnd.sqlite3")
+
+
+@app.post("/admin/restore", dependencies=[Depends(require_admin)])
+async def admin_restore(request: Request):
+    """Load a snapshot; faults off and sessions cleared, as after a reset."""
+    try:
+        db.restore(await request.body())
+    except Exception as e:  # noqa: BLE001 - a bad upload is the caller's error, not a crash
+        raise HTTPException(400, f"not a world snapshot: {e}") from None
+    FAULTS.clear()
+    FAULTS.update(NO_FAULTS)
+    _fault_state.clear()
+    SESSIONS.clear()
+    return {"ok": True}
+
+
 @app.get("/admin/state", dependencies=[Depends(require_admin)])
 def admin_state():
     return JSONResponse(db.ground_truth())
@@ -101,7 +133,8 @@ def home():
         "OurCo Intranet",
         """<h2>OurCo intranet</h2><ul>
 <li><a href="/mail">Corporate mail (ap@ourco.example)</a></li>
-<li><a href="/erp">OurCo ERP</a></li></ul>""",
+<li><a href="/erp">OurCo ERP</a></li>
+<li><a href="/helpdesk">IT Helpdesk</a></li></ul>""",
         "mail",
     )
 
@@ -443,7 +476,7 @@ def erp_create_bill(
 
 
 @app.get("/erp/bills/{bid}", response_class=HTMLResponse)
-def erp_bill(bid: int, request: Request, paid: int = 0):
+def erp_bill(bid: int, request: Request, paid: int = 0, updated: int = 0):
     if r := erp_guard(request):
         return r
     rows = db.query(
@@ -458,11 +491,68 @@ def erp_bill(bid: int, request: Request, paid: int = 0):
         else ""
     )
     ok = "<div class='ok'>Bill marked as paid.</div>" if paid else ""
+    ok += "<div class='ok'>Bill updated.</div>" if updated else ""
     body = f"""<h2>Bill #{b["id"]}</h2>{ok}<table><tr><th>Vendor</th><td>{esc(b["vendor"])}</td></tr>
 <tr><th>Invoice #</th><td>{esc(b["invoice_number"])}</td></tr><tr><th>Amount</th><td>{b["amount_cents"] / 100:.2f} {b["currency"]}</td></tr>
 <tr><th>Invoice date</th><td>{b["invoice_date"]}</td></tr><tr><th>Due date</th><td>{b["due_date"]}</td></tr>
-<tr><th>Notes</th><td>{esc(b["notes"])}</td></tr><tr><th>Status</th><td>{b["status"]}</td></tr></table>{pay}"""
+<tr><th>Notes</th><td>{esc(b["notes"])}</td></tr><tr><th>Status</th><td>{b["status"]}</td></tr></table>{pay}
+{f"<p><a href='/erp/bills/{bid}/edit'>Edit bill</a></p>" if b["status"] == "open" else ""}"""
     return page(f"Bill #{bid} - OurCo ERP", body, "erp", ERP_NAV)
+
+
+def _bill_edit_form(b: dict, errors: list[str]) -> str:
+    errs = "".join(f"<div class='error' role='alert'>{esc(e)}</div>" for e in errors)
+    return f"""<h2>Edit bill #{b["id"]}: {esc(b["invoice_number"])} ({esc(b["vendor"])})</h2>{errs}
+<form method="post" action="/erp/bills/{b["id"]}/edit">
+<label for="idate">Invoice date (YYYY-MM-DD)</label><input id="idate" name="invoice_date" value="{esc(b["invoice_date"])}">
+<label for="ddate">Due date (YYYY-MM-DD)</label><input id="ddate" name="due_date" value="{esc(b["due_date"])}">
+<label for="notes">Notes</label><textarea id="notes" name="notes">{esc(b["notes"])}</textarea>
+<br><button type="submit">Save changes</button></form>"""
+
+
+def _open_bill(bid: int) -> dict | None:
+    rows = db.query(
+        "SELECT b.*, v.name vendor FROM erp_bills b JOIN erp_vendors v ON v.id=b.vendor_id WHERE b.id=?", (bid,)
+    )
+    return dict(rows[0]) if rows and rows[0]["status"] == "open" else None
+
+
+@app.get("/erp/bills/{bid}/edit", response_class=HTMLResponse)
+def erp_edit_bill_form(bid: int, request: Request):
+    if r := erp_guard(request):
+        return r
+    b = _open_bill(bid)
+    if b is None:
+        return page("Not found - OurCo ERP", "<div class='error'>No open bill with that id</div>", "erp", ERP_NAV, 404)
+    return page("Edit bill - OurCo ERP", _bill_edit_form(b, []), "erp", ERP_NAV)
+
+
+@app.post("/erp/bills/{bid}/edit")
+def erp_edit_bill(
+    bid: int, request: Request, invoice_date: str = Form(""), due_date: str = Form(""), notes: str = Form("")
+):
+    if r := erp_guard(request):
+        return r
+    b = _open_bill(bid)
+    if b is None:
+        return page("Not found - OurCo ERP", "<div class='error'>No open bill with that id</div>", "erp", ERP_NAV, 404)
+    d1, d2 = _valid_date(invoice_date.strip()), _valid_date(due_date.strip())
+    errors = []
+    if not d1:
+        errors.append("Invoice date must be in YYYY-MM-DD format.")
+    if not d2:
+        errors.append("Due date must be in YYYY-MM-DD format.")
+    if d1 and d2 and d2 < d1:
+        errors.append("Due date cannot be before invoice date.")
+    if errors:
+        vals = {**b, "invoice_date": invoice_date, "due_date": due_date, "notes": notes}
+        return page("Edit bill - OurCo ERP", _bill_edit_form(vals, errors), "erp", ERP_NAV, 422)
+    db.execute(
+        "UPDATE erp_bills SET invoice_date=?, due_date=?, notes=? WHERE id=?",
+        (invoice_date.strip(), due_date.strip(), notes, bid),
+    )
+    db.audit("bill_updated", f"#{bid} invoice_date={invoice_date.strip()} due_date={due_date.strip()}")
+    return RedirectResponse(f"/erp/bills/{bid}?updated=1", 303)
 
 
 @app.post("/erp/bills/{bid}/pay")
@@ -529,3 +619,6 @@ def erp_vendor_save(vid: int, request: Request, email: str = Form(""), terms: st
 
 
 db.reset()
+
+# The helpdesk registers its routes on `app`; imported last because it uses the helpers above.
+from . import helpdesk  # noqa: E402, F401

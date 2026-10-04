@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 import re
@@ -19,11 +20,21 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from agent.config import PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, WORLD_URL, Settings, admin_headers, reset_workspace
+from agent.config import (
+    PLAYBOOK_PATH,
+    RUNS_DIR,
+    WORKSPACE,
+    WORLD_URL,
+    Settings,
+    admin_headers,
+    reset_workspace,
+    save_world_snapshot,
+)
 from agent.core import Agent
 from agent.human import WebHuman
-from agent.llm import LLMClient, LLMError
+from agent.llm import LLMClient, LLMError, make_verifier_llm
 from agent.memory import Playbook
+from agent.quota import QuotaShortage, preflight
 from agent.vault import Vault
 
 app = FastAPI(title="AutoWork")
@@ -62,6 +73,7 @@ class Run:
         self.done = False
         self.human = WebHuman(self.emit)
         self.lock = threading.Lock()
+        self.stop = threading.Event()
 
     def emit(self, kind: str, data: dict):
         # Persistence + redaction happen in Agent.emit; this is only the in-memory feed for SSE.
@@ -82,6 +94,7 @@ class StartReq(BaseModel):
     task: str = Field(min_length=1, max_length=4000)
     mode: Literal["autonomous", "balanced", "supervised"] = "balanced"
     max_steps: int = Field(40, ge=1, le=100)
+    max_run_tokens: int = Field(0, ge=0, le=10_000_000)  # budget mode for this run; 0 = AUTOWORK_MAX_RUN_TOKENS
     use_playbook: bool = True
     reset_world: bool = False
     faults: Faults | None = None
@@ -111,9 +124,17 @@ def start_run(req: StartReq):
         reset_workspace()
     if not WORKSPACE.exists():
         reset_workspace()
-    settings = Settings.from_env()
     try:
+        settings = Settings.from_env()
+        if req.max_run_tokens:  # e.g. the demo: 150k for the Acme run, 60k for the payment approval
+            settings = dataclasses.replace(
+                settings, max_run_tokens=req.max_run_tokens, max_tokens_total=req.max_run_tokens
+            )
+        settings = preflight(settings, RUNS_DIR)  # budget mode: enough daily quota for one run?
         llm = LLMClient(settings)
+        verifier_llm = make_verifier_llm(settings)
+    except QuotaShortage as e:
+        raise HTTPException(429, str(e)) from e
     except LLMError as e:
         raise HTTPException(400, str(e)) from e
     run = Run()
@@ -129,6 +150,11 @@ def start_run(req: StartReq):
         vault=Vault.load(),
         max_tokens_total=settings.max_tokens_total,
         max_active_seconds=settings.max_active_seconds,
+        context_scheme=settings.context_scheme,
+        world=settings.world,
+        verifier_llm=verifier_llm,
+        no_progress_steps=settings.no_progress_steps,
+        should_stop=run.stop.is_set,
     )
     (RUNS_DIR / agent.run_id).mkdir(parents=True, exist_ok=True)
     run.id = agent.run_id
@@ -137,6 +163,7 @@ def start_run(req: StartReq):
     def work():
         try:
             agent.run(req.task)
+            save_world_snapshot(agent.run_dir)  # with claim.json: lets evals.reverify replay the audit
         finally:
             run.done = True
 
@@ -201,6 +228,24 @@ def answer(rid: str, req: AnswerReq):
     if not run.human.respond(req.qid, payload):
         raise HTTPException(404, "No such pending question")
     return {"ok": True}
+
+
+@app.post("/api/runs/{rid}/stop")
+def stop(rid: str):
+    """Stop between steps; a question the run is waiting on is declined so the agent thread is not left blocked."""
+    run = RUNS.get(rid)
+    if not run or run.done:
+        raise HTTPException(404, "No such running run")
+    run.stop.set()
+    run.human.cancel_all("Stopped by the user.")
+    return {"ok": True}
+
+
+@app.get("/api/world")
+def world():
+    """The apps the agent can reach (config/world.json): the UI's run map names its stations from these."""
+    w = Settings.from_env().world
+    return {"start_url": w.start_url, "apps": [{"name": a.name, "path": a.path, "about": a.about} for a in w.apps]}
 
 
 @app.get("/api/playbook")

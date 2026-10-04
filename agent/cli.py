@@ -10,8 +10,9 @@ import sys
 from .config import MODES, PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, Settings, SettingsError, reset_workspace
 from .core import Agent
 from .human import CLIHuman
-from .llm import LLMClient, LLMError
+from .llm import LLMClient, LLMError, make_verifier_llm
 from .memory import Playbook
+from .quota import QuotaShortage, preflight
 from .vault import Vault
 
 COLORS = {
@@ -55,9 +56,10 @@ def printer(kind: str, data: dict):
 
 def main(argv: list[str] | None = None) -> None:
     try:
-        settings = Settings.from_env()
+        settings = preflight(Settings.from_env(), RUNS_DIR)  # budget mode: enough daily quota for one run?
         llm = LLMClient(settings)
-    except (SettingsError, LLMError) as e:  # configuration problems: a clear message, not a traceback
+        verifier_llm = make_verifier_llm(settings)
+    except (SettingsError, LLMError, QuotaShortage) as e:  # a clear message, not a traceback
         print(f"autowork: {e}", file=sys.stderr)
         sys.exit(2)
     ap = argparse.ArgumentParser(description="AutoWork autonomous task worker")
@@ -84,6 +86,10 @@ def main(argv: list[str] | None = None) -> None:
         vault=Vault.load(),
         max_tokens_total=settings.max_tokens_total,
         max_active_seconds=settings.max_active_seconds,
+        context_scheme=settings.context_scheme,
+        world=settings.world,
+        verifier_llm=verifier_llm,
+        no_progress_steps=settings.no_progress_steps,
     )
     r = agent.run(a.task)
     sys.exit(0 if r.status == "verified" else 1)

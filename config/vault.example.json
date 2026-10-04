@@ -1,4 +1,5 @@
 {
   "erp":  {"login_url": "http://localhost:8001/erp/login",  "username": "ap.clerk", "password": "ledger-42"},
-  "acme": {"login_url": "http://localhost:8001/acme/login", "username": "ourco-ap", "password": "Acme!2026"}
+  "acme": {"login_url": "http://localhost:8001/acme/login", "username": "ourco-ap", "password": "Acme!2026"},
+  "helpdesk": {"login_url": "http://localhost:8001/helpdesk/login", "username": "svc.autowork", "password": "Desk#2026"}
 }

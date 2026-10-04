@@ -69,9 +69,11 @@ class FakeLLM:
         self.on_retry = None
         self.seen: list[list[dict]] = []
         self.tools_offered: list[list[str]] = []
+        self.json_modes: list[bool] = []
 
     def chat(self, messages, tools=None, require_tool=False, json_mode=False, **kw):
         self.seen.append(messages)
+        self.json_modes.append(json_mode)
         self.tools_offered.append([t["function"]["name"] for t in tools or []])
         self.stats["calls"] += 1
         item = self.script.pop(0)
@@ -79,6 +81,25 @@ class FakeLLM:
             return LLMResponse(json.dumps(item), [])
         name, args = item
         return LLMResponse(f"next: {name}", [ToolCall(f"c{self.stats['calls']}", name, args, json.dumps(args))])
+
+
+class RoleLLM(FakeLLM):
+    """A FakeLLM with one script per role (planner, worker, verifier, verifier_checklist, ...), so a test scripts
+    each component separately and a code change that adds or removes a call in one role cannot shift the others.
+    Items left unused at the end are fine: the old code path may not make every call the new one does."""
+
+    def __init__(self, scripts: dict[str, list]):
+        super().__init__([])
+        self.scripts = {k: list(v) for k, v in scripts.items()}
+        self.roles: list[str] = []
+
+    def chat(self, messages, tools=None, require_tool=False, json_mode=False, role="worker", **kw):
+        self.roles.append(role)
+        script = self.scripts.get(role)
+        if not script:
+            raise AssertionError(f"scripted LLM has no more answers for role {role!r} (call {len(self.roles)})")
+        self.script = [script.pop(0)]
+        return super().chat(messages, tools=tools, require_tool=require_tool, json_mode=json_mode, **kw)
 
 
 PLAN = {
@@ -94,10 +115,44 @@ LOGIN = [
 ]  # vault fills it; back on /erp/bills/new
 
 
+# The auditor's task-only checklist for the Acme invoice task, and a correct audit: it opens the SOURCE (Acme's
+# portal) itself, then the record, and compares every field. C7 is PLAN's criterion.
+ACME_CHECKLIST = {
+    "fields": ["Vendor", "Invoice number", "Amount", "Currency", "Invoice date", "Due date"],
+    "conditions": [],
+    "source_apps": ["mail", "acme"],
+    "values_in_task": False,
+}
+AUDIT_ACME_OK = [
+    ACME_CHECKLIST,
+    ("login", {"site": "acme"}),
+    ("browser_goto", {"url": W + "/acme/invoices/INV-2041"}),
+    ("browser_goto", {"url": W + "/erp/bills?q=INV-2041"}),
+    (
+        "verdict",
+        {
+            "passed": True,
+            "reason": "one bill INV-2041 4250.00 USD, all fields match Acme's portal",
+            "evidence": ["bills list", "Acme portal invoice INV-2041"],
+            "source": W + "/acme/invoices/INV-2041",
+            "checks": [
+                {"id": "C1", "ok": True, "record_value": "Acme Supplies Inc.", "source_value": "Acme Supplies Inc."},
+                {"id": "C2", "ok": True, "record_value": "INV-2041", "source_value": "INV-2041"},
+                {"id": "C3", "ok": True, "record_value": "4250.00", "source_value": "4,250.00"},
+                {"id": "C4", "ok": True, "record_value": "USD", "source_value": "USD"},
+                {"id": "C5", "ok": True, "record_value": "2026-10-01", "source_value": "01 Oct 2026"},
+                {"id": "C6", "ok": True, "record_value": "2026-10-31", "source_value": "31 Oct 2026"},
+                {"id": "C7", "ok": True},
+            ],
+        },
+    ),
+]
+
+
 def make_agent(tmp_path, ws, script, human=None, **kw):
     events = []
     a = Agent(
-        FakeLLM(script),
+        script if isinstance(script, FakeLLM) else FakeLLM(script),
         human or ScriptedHuman(),
         ws,
         tmp_path / "runs",

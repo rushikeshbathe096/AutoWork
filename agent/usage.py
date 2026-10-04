@@ -114,7 +114,7 @@ def analyze_sections(
         else:
             sec_text["system_prompt"].append(sys_content)
 
-    if role == "planner":
+    if role in ("planner", "verifier_checklist"):  # system prompt + the task text, same shape
         if messages:
             split_system_playbook(str(messages[0].get("content") or ""))
         if len(messages) > 1:
@@ -143,11 +143,13 @@ def analyze_sections(
             sec_text["system_prompt"].append(str(messages[0].get("content") or ""))
         if len(messages) > 1:
             opening = str(messages[1].get("content") or "")
-            # Opening has: USER TASK, SUCCESS CRITERIA, WORKER'S CLAIM, Facts, Sources
+            # Opening has: USER TASK, SUCCESS CRITERIA, WORKER'S CLAIM, RECORD LOCATIONS, source apps
             # Parse sections out of opening
-            task_m = re.search(r"USER TASK:\s*(.*?)(?=\n\nSUCCESS CRITERIA:|\Z)", opening, re.S)
-            crit_m = re.search(r"SUCCESS CRITERIA:\s*(.*?)(?=\n\nWORKER'S CLAIM:|\Z)", opening, re.S)
-            claim_m = re.search(r"WORKER'S CLAIM:\s*(.*?)(?=\n\nFacts the worker recorded:|\Z)", opening, re.S)
+            task_m = re.search(r"USER TASK:\s*(.*?)(?=\n\nSUCCESS CRITERIA|\Z)", opening, re.S)
+            crit_m = re.search(r"SUCCESS CRITERIA[^\n]*:\s*(.*?)(?=\n\nWORKER'S CLAIM:|\Z)", opening, re.S)
+            claim_m = re.search(
+                r"WORKER'S CLAIM:\s*(.*?)(?=\n\nRECORD LOCATIONS|\n\nFacts the worker recorded:|\Z)", opening, re.S
+            )
             facts_m = re.search(
                 r"Facts the worker recorded:\s*(.*?)(?=\n\nSources the worker looked at:|\Z)", opening, re.S
             )
@@ -162,7 +164,8 @@ def analyze_sections(
                 sec_text["working_memory"].append(facts_m.group(1))
 
             # Remainder of opening goes to other
-            sec_text["other"].append("USER TASK:\n\nStart page: http://localhost:8001/")
+            start_m = re.search(r"Start page: \S+", opening)  # the real line, whatever the world's start URL
+            sec_text["other"].append("USER TASK:\n\n" + (start_m.group(0) if start_m else ""))
 
         # Audit steps history
         audit_turns = messages[2:]
@@ -226,7 +229,8 @@ def analyze_sections(
             if plan_parts:
                 sec_text["plan"].append("\n\n".join(plan_parts))
 
-            sec_text["other"].append("Start page: http://localhost:8001/ . Begin.")
+            start_m = re.search(r"Start page: .*$", brief)
+            sec_text["other"].append(start_m.group(0) if start_m else "")
 
         # Status message is messages[-1] if len(messages) > 2
         if len(messages) > 2:
@@ -348,6 +352,7 @@ class UsageLogger:
         resp_usage: Any = None,
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
+        key: str | None = None,
     ) -> None:
         """Write one usage entry to llm_usage.jsonl."""
         provider = detect_provider(model, base_url)
@@ -393,6 +398,7 @@ class UsageLogger:
             "role": role,
             "model": model,
             "provider": provider,
+            "key": key or None,  # a label such as "groq#2", never the key
             "latency_ms": latency_ms,
             "success": success,
             "error_type": error_type,

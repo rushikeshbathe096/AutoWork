@@ -33,7 +33,7 @@ def fn(name: str, desc: str, props: dict, required: list[str]) -> dict:
     }
 
 
-EID = {"type": "integer", "description": "n from [n] in the latest observation"}
+EID = {"type": "integer", "description": "[n] from the latest observation"}
 
 BROWSER_GOTO = fn(
     "browser_goto",
@@ -49,7 +49,7 @@ BROWSER_CLICK = fn(
 )
 BROWSER_FILL = fn(
     "browser_fill",
-    "Fill form fields in one go (selects: the visible option text). Values are read back. Does NOT submit.",
+    "Fill form fields (selects: visible option text). Values are read back. Does NOT submit.",
     {
         "fields": {
             "type": "array",
@@ -65,14 +65,14 @@ BROWSER_FILL = fn(
 BROWSER_READ = fn(
     "browser_read",
     "Full text of the current page (observations show an excerpt).",
-    {"offset": {"type": "integer", "description": "Character offset, default 0"}},
+    {"offset": {"type": "integer", "description": "start character"}},
     [],
 )
 BROWSER_BACK = fn("browser_back", "Go back.", {}, [])
 LOGIN = fn(
     "login",
-    "Sign in with the credential vault (you never see the password). Use on any login page.",
-    {"site": {"type": "string", "description": "Vault site name"}},
+    "Sign in from the credential vault (password never shown). Use on any login page.",
+    {"site": {"type": "string"}},
     ["site"],
 )
 LIST_FILES = fn("list_files", "List workspace files.", {}, [])
@@ -85,13 +85,13 @@ WRITE_FILE = fn(
 )
 REMEMBER = fn(
     "remember",
-    "Save a fact to working memory, which survives when old observations are dropped.",
+    "Save a fact to working memory (kept when old observations are dropped).",
     {"key": {"type": "string"}, "value": {"type": "string"}},
     ["key", "value"],
 )
 ASK_HUMAN = fn(
     "ask_human",
-    "Ask the user and wait. Only when you cannot safely proceed after investigating.",
+    "Ask the user and wait; only if you cannot safely proceed after investigating.",
     {
         "question": {"type": "string"},
         "options": {"type": "array", "items": {"type": "string"}},
@@ -100,7 +100,7 @@ ASK_HUMAN = fn(
 )
 FINISH = fn(
     "finish",
-    "End the task: done (achieved and checked), failed (cannot be achieved) or needs_user (a human must act).",
+    "End the task: done (achieved and checked), failed (impossible) or needs_user (a human must act).",
     {
         "status": {"type": "string", "enum": ["done", "failed", "needs_user"]},
         "summary": {"type": "string", "description": "1-4 sentences for the user"},
@@ -110,13 +110,36 @@ FINISH = fn(
 )
 VERDICT = fn(
     "verdict",
-    "Report your verification result.",
+    "Report your verification result. A pass is accepted only with a source you opened yourself and one entry "
+    "in `checks` per checklist item (C1, C2, ...), with both values for every FIELD item.",
     {
         "passed": {"type": "boolean"},
         "reason": {"type": "string"},
         "evidence": {"type": "array", "items": {"type": "string"}},
+        "source": {
+            "type": "string",
+            "description": "URL (or 'workspace file <path>') of the source document you opened and compared "
+            "against, or 'task' if every value is stated in the task itself. Never the record being checked.",
+        },
+        "checks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "checklist id, e.g. C3"},
+                    "ok": {"type": "boolean"},
+                    "record_value": {"type": "string", "description": "value in the record, as shown there"},
+                    "source_value": {"type": "string", "description": "value in the source, as shown there"},
+                    "directory": {"type": "string", "description": "[REFERENCE] items: the directory page URL"},
+                    "record_id": {"type": "string", "description": "[REFERENCE]: ID of the record's entry"},
+                    "source_key": {"type": "string", "description": "[REFERENCE]: source value naming one entry"},
+                    "source_id": {"type": "string", "description": "[REFERENCE]: ID of that entry"},
+                },
+                "required": ["id", "ok"],
+            },
+        },
     },
-    ["passed", "reason", "evidence"],
+    ["passed", "reason", "evidence", "source", "checks"],
 )
 
 WORKER_TOOLS = [
@@ -177,7 +200,11 @@ class ToolBox:
     ):
         self.browser = browser
         self.provenance = provenance
-        self.sources: list[str] = []  # pages and files observed, in order: pointers for the auditor
+        self.sources: list[str] = []  # pages and files observed, in order
+        self.records: list[str] = []  # pages reached by submitting a form: where the worker's writes landed
+        self.seen: dict[str, list[str]] = {}  # location -> observation texts (for the auditor's value checks)
+        self.last_observation: str | None = None  # environment text the last call returned (None: not a reading)
+        self.last_changed_state = False  # the last call submitted a form that landed, or wrote a file
         self.workspace = workspace
         self.memory = memory
         self.vault = vault
@@ -188,12 +215,16 @@ class ToolBox:
             return ToolResult(
                 f"ERROR: arguments were not valid JSON: {args['__invalid_json__'][:200]}", "invalid arguments", ok=False
             )
+        self.last_observation, self.last_changed_state = None, False
         impl = getattr(self, f"_t_{name}", None)
         if impl is None:
             return ToolResult(f"ERROR: unknown tool {name!r}", "unknown tool", ok=False)
         try:
+            records = len(self.records)
             result = self._redact(impl(step=step, **args))
+            self.last_changed_state = len(self.records) > records or (name == "write_file" and result.ok)
             if name in SOURCE_TOOLS:
+                self.last_observation = result.text
                 if self.provenance:
                     self.provenance.observe(result.text)
                 where = f"workspace file {args.get('path')}" if name == "read_file" else None
@@ -201,6 +232,8 @@ class ToolBox:
                     where = self._current_url()
                 if where and where not in self.sources:
                     self.sources.append(where)
+                if where:
+                    self.seen.setdefault(where, []).append(result.text)
             return result
         except ApprovalRequired:
             raise  # the agent loop handles this: it asks a human
@@ -244,22 +277,41 @@ class ToolBox:
         return self._obs(self.browser.goto(url), "opened")
 
     def _t_browser_click(self, element_id: int, step: int):
-        return self._obs(self.browser.click(element_id), f"clicked [{element_id}]")
+        before = getattr(self.browser, "last", None)
+        el = before.element(element_id) if before else None
+        res = self._obs(self.browser.click(element_id), f"clicked [{element_id}]")
+        submitted = el is not None and (el.get("tag") == "button" or el.get("type") == "submit")
+        url = self._current_url()
+        if submitted and res.ok and url and before and url != before.url and url not in self.records:
+            self.records.append(url)
+        return res
 
     def _t_browser_fill(self, fields: list, step: int):
+        before = getattr(self.browser, "last", None)
         out = self.browser.fill(fields)
-        unsourced = [
-            f"[{f.get('element_id')}] {f.get('value')!r}"
-            for f in fields
-            if isinstance(f, dict) and self.provenance and not self.provenance.is_sourced(str(f.get("value", "")))
-        ]
+        unsourced, conflicts = [], []
+        for f in fields:
+            if not (isinstance(f, dict) and self.provenance):
+                continue
+            value = str(f.get("value", ""))
+            if not self.provenance.is_sourced(value):
+                unsourced.append(f"[{f.get('element_id')}] {value!r}")
+                continue
+            el = before.element(int(f["element_id"])) if before and str(f.get("element_id", "")).isdigit() else None
+            if el and (why := self.provenance.label_conflict(el.get("label", ""), value)):
+                conflicts.append(f"[{f.get('element_id')}] {why}")
         if unsourced:
             out += (
                 "\nUNSOURCED VALUES: " + ", ".join(unsourced) + " do not appear in the task or in anything you "
                 "observed this run (dates and amounts compared in any format). Do not invent data: find the source "
                 "and correct the field, or clear it if it is optional. Ask the human if the data does not exist."
             )
-        return ToolResult(out, out[:300], ok="MISMATCH" not in out and not unsourced)
+        if conflicts:
+            out += (
+                "\nLABEL CONFLICT: " + "; ".join(conflicts) + ". You may have copied the wrong value: re-read the "
+                "source and use the value labelled like this field."
+            )
+        return ToolResult(out, out[:300], ok="MISMATCH" not in out and not unsourced and not conflicts)
 
     def _t_browser_read(self, step: int, offset: int = 0):
         out = self.browser.read(int(offset or 0))

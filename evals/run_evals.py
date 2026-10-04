@@ -16,6 +16,7 @@ If the provider's quota runs out mid-suite, that run is discarded (not the agent
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import shutil
@@ -28,11 +29,21 @@ from pathlib import Path
 import httpx
 import uvicorn
 
-from agent.config import PLAYBOOK_PATH, RUNS_DIR, WORKSPACE, WORLD_URL, Settings, admin_headers, reset_workspace
+from agent.config import (
+    PLAYBOOK_PATH,
+    RUNS_DIR,
+    WORKSPACE,
+    WORLD_URL,
+    Settings,
+    admin_headers,
+    reset_workspace,
+    save_world_snapshot,
+)
 from agent.core import Agent
 from agent.human import ScriptedHuman
-from agent.llm import LLMClient
+from agent.llm import LLMClient, make_verifier_llm
 from agent.memory import Playbook
+from agent.quota import QuotaShortage, preflight
 from agent.vault import Vault
 
 from .report import categorize, is_honest, render_history
@@ -108,6 +119,12 @@ def main():
     ap.add_argument("--mode", default="balanced")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--model", help="override LLM_MODEL for this run")
+    ap.add_argument(
+        "--max-run-tokens",
+        type=int,
+        help="budget mode: cap each run at this many tokens (overrides AUTOWORK_MAX_RUN_TOKENS); on Groq, a run only "
+        "starts when a key has that much daily quota left, else the suite stops and prints when to --resume",
+    )
     ap.add_argument("--report", action="store_true", help="only regenerate results.md from the history")
     ap.add_argument(
         "--resume",
@@ -134,6 +151,8 @@ def main():
     pb_path = PLAYBOOK_PATH if a.playbook else HERE / ".eval_playbook.json"
     for model in models:
         settings = base.for_model(model)
+        if a.max_run_tokens:
+            settings = dataclasses.replace(settings, max_run_tokens=a.max_run_tokens, max_tokens_total=a.max_run_tokens)
         print(f"\n##### model {model}", flush=True)
         try:
             run_tasks(remaining_tasks(a, settings), a, settings, pb_path)
@@ -156,6 +175,7 @@ def remaining_tasks(a: argparse.Namespace, settings: Settings) -> list[Task]:
         if r.get("model") == settings.llm_model
         and r.get("code") == version
         and bool(r.get("playbook")) == a.playbook
+        and r.get("context", "classic") == settings.context_scheme
         and not r.get("discarded")
     )
     todo = [t for t in tasks if graded[t.id] < a.repeat]
@@ -185,7 +205,12 @@ def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_p
                 if not a.quiet:
                     print(f"  [{tid}] {k}: {json.dumps(d, default=str)[:160]}", flush=True)
 
-            llm = LLMClient(settings)
+            try:
+                run_settings = preflight(settings, RUNS_DIR)  # budget mode: a key with enough daily quota
+            except QuotaShortage as e:
+                raise QuotaStop(f"{e}\n    Not started: {t.id} (rep {rep + 1}) and the tasks after it") from None
+            llm = LLMClient(run_settings)
+            verifier_llm = make_verifier_llm(run_settings)
             agent = Agent(
                 llm,
                 human,
@@ -199,10 +224,14 @@ def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_p
                 vault=Vault.load(),
                 max_tokens_total=settings.max_tokens_total,
                 max_active_seconds=settings.max_active_seconds,
+                context_scheme=settings.context_scheme,
+                world=settings.world,
+                verifier_llm=verifier_llm,
+                no_progress_steps=settings.no_progress_steps,
             )
             print(f"\n=== {t.id} (rep {rep + 1}) ===", flush=True)
             report = agent.run(t.task)
-            if llm.quota_exhausted:
+            if llm.quota_exhausted or (verifier_llm is not None and verifier_llm.quota_exhausted):
                 # Recorded (not graded) so the report can show how many runs were dropped: silently excluding
                 # them would be indistinguishable from cherry-picking.
                 append_history(
@@ -212,6 +241,7 @@ def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_p
                         when=time.strftime("%Y-%m-%d %H:%M"),
                         mode=a.mode,
                         playbook=a.playbook,
+                        context=settings.context_scheme,
                         task=t.id,
                         rep=rep + 1,
                         discarded=True,
@@ -221,6 +251,7 @@ def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_p
                     )
                 )
                 raise QuotaStop(f"{settings.llm_model} is out of quota during {t.id}; that run was discarded")
+            save_world_snapshot(RUNS_DIR / report.run_id)  # with claim.json: lets evals.reverify replay the audit
             state = httpx.get(f"{WORLD_URL}/admin/state", headers=admin_headers(), timeout=10).json()
             try:
                 failures = t.check(state, report, human, WORKSPACE)
@@ -234,6 +265,7 @@ def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_p
                 when=time.strftime("%Y-%m-%d %H:%M"),
                 mode=a.mode,
                 playbook=a.playbook,
+                context=settings.context_scheme,
                 task=t.id,
                 rep=rep + 1,
                 passed=passed,
@@ -243,8 +275,15 @@ def run_tasks(tasks: list[Task], a: argparse.Namespace, settings: Settings, pb_p
                 steps=report.steps,
                 seconds=report.duration_s,
                 llm_calls=report.llm.get("calls", 0),
-                tokens=report.llm.get("prompt_tokens", 0) + report.llm.get("completion_tokens", 0),
-                cached_tokens=report.llm.get("cached_tokens", 0),
+                tokens=sum(
+                    u.get("prompt_tokens", 0) + u.get("completion_tokens", 0)
+                    for u in (report.llm, report.llm.get("verifier") or {})
+                ),
+                cached_tokens=report.llm.get("cached_tokens", 0)
+                + (report.llm.get("verifier") or {}).get("cached_tokens", 0),
+                verifier_model=report.verifier_model,
+                key=getattr(llm, "key_label", "") or None,
+                max_run_tokens=run_settings.max_run_tokens or None,
                 failures=[str(f) for f in failures],
                 info=t.info(state) if t.info else "",
                 run_id=report.run_id,

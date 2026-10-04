@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import openai
 import pytest
@@ -12,7 +14,7 @@ from agent.config import Settings, SettingsError
 from agent.context import Turn, build_messages, note
 from agent.llm import LLMClient, LLMError, QuotaExhausted, ToolCall, _retry_after, parse_json
 from agent.memory import Playbook, WorkingMemory
-from agent.stuck import ErrorStreak, RepetitionDetector, Signal
+from agent.stuck import ErrorStreak, ProgressTracker, RepetitionDetector, Signal
 from agent.tools import ToolResult
 from agent.vault import REDACTED, Redactor
 
@@ -79,6 +81,22 @@ def test_snapshot_render_truncates_and_flags_failures():
     assert "[70] link" in out and "[71] link" not in out and "30 more elements" in out
     assert "4900 more chars" in out
     assert out.startswith("URL: http://x/p\n<<<UNTRUSTED_WEB_PAGE") and out.endswith("END_UNTRUSTED_WEB_PAGE>>>")
+
+
+def test_page_text_skips_lines_that_repeat_listed_elements_and_is_shorter_with_elements():
+    els = [
+        btn(1, "Save bill"),
+        {"id": 2, "tag": "a", "text": "Bills", "href": "/b"},
+        {"id": 3, "tag": "input", "type": "text", "label": "Due date (YYYY-MM-DD)", "value": ""},
+    ]
+    text = "Bills\nNew bill\nDue date (YYYY-MM-DD)\n  save   BILL \nInvoice IN-7002 due 2026-10-30"
+    out = Snapshot("http://x/p", "T", 200, els, [], text, False).render()
+    page = out.split("PAGE TEXT:\n", 1)[1]
+    assert page.startswith("New bill\nInvoice IN-7002 due 2026-10-30")  # repeats of elements dropped
+    assert "[1] button" in out and "[2] link" in out  # ...they are still listed as elements
+    long = "y" * 3000
+    assert "1800 more chars" in Snapshot("u", "T", 200, els, [], long, False).render()  # 1200 with elements
+    assert "1200 more chars" in Snapshot("u", "T", 200, [], [], long, False).render()  # 1800 without
 
 
 def test_snapshot_masks_nothing_it_was_not_given_and_fingerprint_tracks_content():
@@ -363,6 +381,33 @@ def test_repetition_detector_stages_and_fingerprint():
     )
 
 
+def test_progress_tracker_stops_busy_work():
+    p = ProgressTracker(stop_after=5)  # warns at 2 (5 - 3)
+    assert p.observe("/mail", "inbox page", {}) is Signal.OK  # first sight of a URL and its text
+    # re-typing the search box (no observation) and reopening the same inbox: nothing new
+    seq = [p.observe("/mail", obs, {}) for obs in (None, None, "inbox page", None)]
+    assert seq == [Signal.OK, Signal.WARN, Signal.OK, Signal.OK]
+    assert p.observe("/mail", None, {}) is Signal.STOP and p.stalled == 5
+    assert "no new URL, no new memory fact" in ProgressTracker.why(5)
+
+
+def test_progress_tracker_counts_each_kind_of_progress():
+    p = ProgressTracker(stop_after=3)
+    p.observe("/a", "page a", {})
+    p.observe("/a", None, {})
+    assert p.observe("/b", None, {}) is Signal.OK and p.stalled == 0  # new URL
+    p.observe("/b", None, {})
+    assert p.observe("/b", "page b, next chunk", {}) is Signal.OK and p.stalled == 0  # new information
+    p.observe("/b", None, {})
+    assert p.observe("/b", None, {"vendor": "Globex"}) is Signal.OK and p.stalled == 0  # new memory fact
+    p.observe("/b", None, {"vendor": "Globex"})  # re-remembering the same fact is not new
+    assert p.stalled == 1
+    assert p.observe("/b", None, {"vendor": "Globex"}, state_changed=True) is Signal.OK and p.stalled == 0
+    assert ProgressTracker(stop_after=0).observe("/a", None, {}) is Signal.OK  # disabled: never stops
+    off = ProgressTracker(stop_after=0)
+    assert all(off.observe("/a", None, {}) is Signal.OK for _ in range(50))
+
+
 def test_error_streak():
     e = ErrorStreak()
     assert [e.observe(False) for _ in range(6)] == [
@@ -406,6 +451,91 @@ def test_build_messages_compresses_old_observations():
     assert {"role": "user", "content": "a system note"} in msgs and msgs[-1]["content"] == "STATUS"
 
 
+def _page(i: int) -> ToolResult:
+    return ToolResult(f"URL: http://w/p{i}\n" + "x" * 500, f"[opened -> http://w/p{i} | P{i}] (old observation elided)")
+
+
+def _digest_turns() -> list[Turn]:
+    """10 steps: pages, a bad-arguments error, a human denial, a human note, a memory write."""
+    t = [
+        Turn(f"reason {i}", f"c{i}", "browser_goto", json.dumps({"url": f"http://w/p{i}"}), _page(i)) for i in range(10)
+    ]
+    t[1] = Turn(
+        "r",
+        "c1",
+        "browser_back",
+        '{"session_id": "x"}',
+        ToolResult(
+            "ERROR: bad arguments for browser_back: unexpected keyword argument 'session_id'", "bad arguments", ok=False
+        ),
+    )
+    t[2] = Turn(
+        "r",
+        "c2",
+        "browser_click",
+        '{"element_id": 9}',
+        ToolResult(
+            "DENIED by human: controller must approve payments. Do not retry this action.", "denied by human", ok=False
+        ),
+    )
+    t[4] = Turn(
+        "r", "c4", "remember", '{"key": "amount", "value": "4250.00"}', ToolResult("Stored 'amount'", "Stored 'amount'")
+    )
+    t.insert(3, note("Human guidance after repeated failures: use the ERP search box"))
+    return t
+
+
+def test_digest_collapses_old_turns_into_one_message_and_keeps_recent_native():
+    turns = _digest_turns()
+    msgs = build_messages("SYS", "BRIEF", turns, "STATUS", keep_full=2, scheme="digest")
+    digests = [m for m in msgs if m["role"] == "user" and m["content"].startswith("EARLIER STEPS")]
+    assert len(digests) == 1 and msgs[2] is digests[0]  # right after the brief
+    native = [m for m in msgs if m["role"] == "assistant"]
+    assert len(native) == 3  # the last 3 turns (the 2 full observations are among them)
+    for i, m in enumerate(msgs):  # every native tool call is answered, so the request is valid
+        if m["role"] == "assistant":
+            assert msgs[i + 1]["role"] == "tool" and msgs[i + 1]["tool_call_id"] == m["tool_calls"][0]["id"]
+    tool_texts = [m["content"] for m in msgs if m["role"] == "tool"]
+    assert sum(t.startswith("URL:") for t in tool_texts) == 2  # keep_full=2 still holds
+    assert msgs[-1]["content"] == "STATUS"
+
+
+def test_digest_never_drops_errors_denials_human_notes_or_memory_writes():
+    text = build_messages("S", "B", _digest_turns(), "ST", keep_full=2, scheme="digest")[2]["content"]
+    lines = text.splitlines()[1:]
+    assert lines[0] == '1. browser_goto(url="http://w/p0") -> [opened -> http://w/p0 | P0]'  # pages: short form
+    assert '2. browser_back(session_id="x") -> FAILED: ERROR: bad arguments for browser_back: unexpected' in lines[1]
+    assert "DENIED by human: controller must approve payments. Do not retry this action." in lines[2]
+    assert lines[3] == "   note: Human guidance after repeated failures: use the ERP search box"
+    assert lines[4].startswith("4. browser_goto")  # notes don't shift step numbers
+    assert lines[5] == '5. remember(key="amount", value="4250.00") -> Stored \'amount\''
+    assert "reason" not in text  # old reasoning is dropped
+
+
+def test_digest_keeps_both_full_observations_native_even_beyond_three_turns():
+    turns = [Turn("r", f"c{i}", "browser_goto", "{}", _page(i)) for i in range(5)]
+    turns += [Turn("r", f"m{i}", "remember", "{}", ToolResult("Stored", "Stored")) for i in range(3)]
+    msgs = build_messages("S", "B", turns, "ST", keep_full=2, scheme="digest")
+    tool_texts = [m["content"] for m in msgs if m["role"] == "tool"]
+    assert [t[:15] for t in tool_texts if t.startswith("URL:")] == ["URL: http://w/p", "URL: http://w/p"]
+    assert len([m for m in msgs if m["role"] == "assistant"]) == 5  # tail extended from 3 to 5 turns
+
+
+def test_digest_is_identical_to_classic_for_short_runs_and_rejects_unknown_schemes():
+    turns = [Turn("r", f"c{i}", "browser_goto", "{}", _page(i)) for i in range(3)]
+    assert build_messages("S", "B", turns, "ST", scheme="digest") == build_messages("S", "B", turns, "ST")
+    with pytest.raises(ValueError, match="unknown context scheme"):
+        build_messages("S", "B", turns, "ST", scheme="zip")
+
+
+def test_context_scheme_setting_is_validated_and_survives_for_model():
+    assert Settings.from_env({"LLM_API_KEY": "k"}).context_scheme == "classic"
+    env = {"LLM_API_KEY": "k", "AUTOWORK_CONTEXT": "Digest"}
+    assert Settings.from_env(env).for_model("qwen/qwen3.8-27b", env).context_scheme == "digest"
+    with pytest.raises(SettingsError, match="AUTOWORK_CONTEXT='zip'"):
+        Settings.from_env({"LLM_API_KEY": "k", "AUTOWORK_CONTEXT": "zip"})
+
+
 # ----------------------------------------------------------------- redaction
 def test_redactor_handles_nested_structures():
     r = Redactor(["hunter22", "s3cret"])
@@ -431,3 +561,127 @@ def test_config_errors_raise_clearly_and_never_fall_back(cls, status, hint):
         c.chat([{"role": "user", "content": "x"}])
     assert len(primary.chat.completions.calls) == 1 and fallback.chat.completions.calls == []  # no retry, no switch
     assert c.model == "qwen/qwen3.8-27b" and not c.quota_exhausted
+
+
+# ----------------------------------------------------------------- world config (config/world.json)
+ORIGINAL_RISK = {  # the vocabulary that was hardcoded in agent/policy.py and agent/netpolicy.py before the move
+    "button_words": [
+        "pay",
+        "paid",
+        "payment",
+        "delete",
+        "remove",
+        "wire",
+        "transfer",
+        "refund",
+        "approve",
+        "cancel",
+        "terminate",
+    ],
+    "path_segments": [
+        "pay",
+        "payment",
+        "payments",
+        "delete",
+        "remove",
+        "transfer",
+        "wire",
+        "refund",
+        "approve",
+        "cancel",
+    ],
+    "path_substrings": ["bank", "iban", "payout"],
+    "field_substrings": ["bank", "iban", "swift", "routing", "account_number", "payout"],
+}
+
+
+def test_world_compiler_reproduces_the_previously_hardcoded_rules_exactly():
+    """The gates' vocabulary moved from agent code to config/world.json. Compiled from the original word lists, the
+    rules must be identical to the regex literals the code had before the move, so nothing changed for the ERP."""
+    import re as re_
+
+    from agent.world import parse_world
+
+    w = parse_world(
+        {
+            "start_url": "http://localhost:8001/",
+            "description": "d",
+            "allowed_origins": ["http://localhost:8001"],
+            "high_risk": ORIGINAL_RISK,
+        }
+    )
+    old_label = r"\b(pay|paid|payment|delete|remove|wire|transfer|refund|approve|cancel|terminate)\b"
+    old_path = r"/(pay|payment|payments|delete|remove|transfer|wire|refund|approve|cancel)(/|$)|bank|iban|payout"
+    old_field = r"(^|&)[^=&]*(bank|iban|swift|routing|account_number|payout)[^=&]*="
+    assert (w.risk.button_label.pattern, w.risk.path.pattern, w.risk.form_field.pattern) == (
+        old_label,
+        old_path,
+        old_field,
+    )
+    assert all(p.flags & re_.I for p in (w.risk.button_label, w.risk.path, w.risk.form_field))
+
+
+def test_checked_in_world_keeps_every_original_rule_and_origin():
+    import json as json_
+
+    from agent.world import DEFAULT_WORLD_FILE, default_world
+
+    risk = json_.loads(DEFAULT_WORLD_FILE.read_text())["high_risk"]
+    for key, words in ORIGINAL_RISK.items():
+        assert set(words) <= set(risk[key]), key  # apps may add risky actions; none may be dropped silently
+    w = default_world()
+    assert w.allowed_origins == frozenset({("http", "localhost", 8001)}) and w.blocked_path_prefixes == ("/admin",)
+    assert w.description.startswith("Company intranet start page: http://localhost:8001/  (links to webmail")
+
+
+def _world_env(tmp_path, **override) -> dict:
+    import json as json_
+
+    from agent.world import DEFAULT_WORLD_FILE
+
+    data = {**json_.loads(DEFAULT_WORLD_FILE.read_text()), **override}
+    f = tmp_path / "world.json"
+    f.write_text(json_.dumps(data))
+    return {"LLM_API_KEY": "k", "AUTOWORK_WORLD_FILE": str(f)}
+
+
+def test_world_file_is_validated_at_startup(tmp_path):
+    with pytest.raises(SettingsError, match="start_url .* must be an http"):
+        Settings.from_env(_world_env(tmp_path, start_url="http://elsewhere.example/"))
+    with pytest.raises(SettingsError, match="button_words must be a non-empty list"):
+        Settings.from_env(
+            _world_env(
+                tmp_path,
+                high_risk={
+                    "button_words": [],
+                    "path_segments": ["x"],
+                    "path_substrings": ["x"],
+                    "field_substrings": ["x"],
+                },
+            )
+        )
+    with pytest.raises(SettingsError, match="cannot read"):
+        Settings.from_env({"LLM_API_KEY": "k", "AUTOWORK_WORLD_FILE": str(tmp_path / "missing.json")})
+
+
+def test_a_new_apps_risky_actions_are_declared_in_config_not_code(tmp_path):
+    from agent.core import Agent
+
+    risk = {
+        "button_words": ["pay", "grant admin"],
+        "path_segments": ["pay"],
+        "path_substrings": ["iban"],
+        "field_substrings": ["iban"],
+    }
+    w = Settings.from_env(_world_env(tmp_path, high_risk=risk, start_url="http://localhost:8001/helpdesk")).world
+    finance_only = Settings.from_env(_world_env(tmp_path, high_risk=ORIGINAL_RISK)).world
+    button = snap(btn(1, "Grant admin"))
+    undeclared = policy.evaluate("browser_click", {"element_id": 1}, button, high_risk=finance_only.risk.button_label)
+    assert undeclared.verdict == "allow"  # not declared: the gate doesn't know it is risky (a documented limitation)
+    assert (
+        policy.evaluate("browser_click", {"element_id": 1}, button).verdict == "approve"
+    )  # checked-in world declares it
+    assert (
+        policy.evaluate("browser_click", {"element_id": 1}, button, high_risk=w.risk.button_label).verdict == "approve"
+    )
+    assert Agent._brief("t", {}, w.start_url).endswith("Start page: http://localhost:8001/helpdesk . Begin.")

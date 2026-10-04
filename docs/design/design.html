@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+
+<html lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e2bfb2","secondary-container":"#e4e1e5","surface":"#fbf9f4","primary-fixed":"#ffdbce","surface-bright":"#fbf9f4","on-tertiary":"#ffffff","on-secondary":"#ffffff","primary":"#a33900","primary-container":"#cc4900","tertiary":"#006b2c","on-secondary-fixed":"#1b1b1e","tertiary-fixed-dim":"#62df7d","on-primary-fixed-variant":"#7f2b00","surface-container-highest":"#e4e2dd","surface-container-high":"#eae8e3","on-primary":"#ffffff","surface-dim":"#dbdad5","surface-container":"#f0eee9","surface-variant":"#e4e2dd","outline":"#8e7166","on-tertiary-container":"#f7fff2","secondary-fixed-dim":"#c8c6c9","inverse-surface":"#30312e","inverse-primary":"#ffb599","surface-container-low":"#f5f3ee","on-tertiary-fixed-variant":"#005320","secondary-fixed":"#e4e1e5","on-error-container":"#93000a","on-error":"#ffffff","on-tertiary-fixed":"#002109","on-primary-container":"#fffbff","on-surface-variant":"#5a4138","on-background":"#1b1c19","error":"#ba1a1a","on-surface":"#1b1c19","background":"#fbf9f4","tertiary-fixed":"#7ffc97","surface-tint":"#a73a00","primary-fixed-dim":"#ffb599","tertiary-container":"#00873a","on-secondary-fixed-variant":"#47464a","on-secondary-container":"#656467","inverse-on-surface":"#f2f1ec","on-primary-fixed":"#370e00","secondary":"#5f5e61","error-container":"#ffdad6","surface-container-lowest":"#ffffff"},borderRadius:{DEFAULT:"0.25rem",lg:"0.5rem",xl:"0.75rem",full:"9999px"},spacing:{"space-lg":"1.25rem","margin-mobile":"0.75rem","space-xs":"0.25rem","space-md":"0.75rem",gutter:"1rem","space-sm":"0.5rem","space-xxs":"0.125rem","gutter-compact":"0.5rem","space-xl":"2rem",margin:"1.5rem"},fontFamily:{"code-sm":["IBM Plex Mono"],"headline-lg":["IBM Plex Sans"],"headline-xl-mobile":["IBM Plex Sans"],"label-tabular":["IBM Plex Mono"],"headline-sm":["IBM Plex Sans"],"body-md":["IBM Plex Sans"],"headline-xl":["IBM Plex Sans"],"title-md":["IBM Plex Sans"],"code-md":["IBM Plex Mono"],"body-sm":["IBM Plex Sans"],"body-lg":["IBM Plex Sans"],"code-lg":["IBM Plex Mono"]},fontSize:{"code-sm":["11px",{lineHeight:"14px",letterSpacing:"-0.01em",fontWeight:"400"}],"headline-lg":["24px",{lineHeight:"32px",letterSpacing:"-0.015em",fontWeight:"600"}],"headline-xl-mobile":["28px",{lineHeight:"36px",letterSpacing:"-0.01em",fontWeight:"600"}],"label-tabular":["10px",{lineHeight:"12px",letterSpacing:"0.06em",fontWeight:"600"}],"headline-sm":["18px",{lineHeight:"24px",letterSpacing:"-0.01em",fontWeight:"500"}],"body-md":["13px",{lineHeight:"18px",fontWeight:"400"}],"headline-xl":["36px",{lineHeight:"44px",letterSpacing:"-0.02em",fontWeight:"600"}],"title-md":["15px",{lineHeight:"20px",letterSpacing:"-0.005em",fontWeight:"600"}],"code-md":["12px",{lineHeight:"16px",letterSpacing:"-0.01em",fontWeight:"400"}],"body-sm":["11px",{lineHeight:"16px",fontWeight:"400"}],"body-lg":["15px",{lineHeight:"22px",fontWeight:"400"}],"code-lg":["13px",{lineHeight:"18px",letterSpacing:"0em",fontWeight:"500"}]}}}};</script></head><body class="bg-surface text-on-surface antialiased"><header class="fixed top-0 left-0 right-0 z-50 h-14 bg-surface border-b border-surface-container-highest"><div class="w-full h-14 px-space-md flex items-center justify-between gap-space-md"><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs"><span class="font-title-md text-title-md text-on-surface tracking-tight">AutoWork</span><div class="w-1.5 h-1.5 bg-primary"></div></div><div class="h-4 w-px bg-surface-container-highest"></div><nav class="flex items-center gap-space-sm" data-active-classes="text-on-surface font-headline-sm"><a aria-current="page" class="transition-colors px-space-xs py-space-xxs text-on-surface font-headline-sm" data-path="live-execution-ledger" href="#">Operations</a><a class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface transition-colors px-space-xs py-space-xxs" data-path="run-manifest-history" href="#">Runs</a><a class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface transition-colors px-space-xs py-space-xxs" data-path="agent-orchestration-registry" href="#">Agents</a><a class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface transition-colors px-space-xs py-space-xxs" data-path="telemetry-audit-log" href="#">Audit</a></nav></div><div class="hidden md:flex items-center gap-space-md"><div class="flex items-center gap-space-xs font-code-sm text-code-sm text-on-surface-variant"><span class="text-secondary">RUN:</span><span class="text-on-surface">20261004-010939</span></div><div class="h-4 w-px bg-surface-container-highest"></div><div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container-high border border-outline-variant/40"><span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span><span class="font-label-tabular text-label-tabular uppercase text-primary">Waiting for approval</span></div><div class="h-4 w-px bg-surface-container-highest"></div><div class="flex items-center gap-space-xs font-code-sm text-code-sm"><span class="text-secondary">MODEL</span><span class="px-1.5 py-0.5 bg-surface-container-low border border-surface-container-highest text-on-surface">qwen/qwen3.8-27b</span></div><div class="flex items-center gap-space-xs font-body-sm text-body-sm text-on-surface-variant"><span class="text-secondary">MODE</span><span class="font-medium text-on-surface">Balanced</span></div><div class="flex items-center gap-space-xs font-code-sm text-code-sm text-on-surface-variant"><span class="text-secondary">TIME</span><span class="text-on-surface font-label-tabular text-label-tabular">04:18</span></div><div class="h-4 w-px bg-surface-container-highest"></div><div class="flex items-center gap-space-xs"><svg class="w-12 h-4 text-primary" fill="none" stroke="currentColor" stroke-width="1.5" viewbox="0 0 48 16"><path d="M1 12 L8 10 L14 13 L22 5 L28 9 L36 3 L42 7 L47 2" stroke-linecap="square" stroke-linejoin="miter"></path></svg><span class="font-code-sm text-code-sm text-on-surface-variant">42.8k tokens</span></div></div><div class="flex items-center gap-space-sm"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><aside class="fixed left-0 top-14 bottom-0 w-72 bg-surface-container-low border-r border-surface-container-highest z-40 flex flex-col justify-between"><div class="flex flex-col"><div class="h-9 px-space-md flex items-center justify-between border-b border-surface-container-highest bg-surface-container"><span class="font-label-tabular text-label-tabular uppercase tracking-wider text-secondary">Task Ledger &amp; Controls</span><span class="font-code-sm text-code-sm text-on-surface-variant">C1</span></div><nav class="flex flex-col py-space-xs" data-active-classes="bg-surface text-on-surface border-l-2 border-primary"><a aria-current="page" class="flex items-center justify-between px-space-md py-space-xs transition-colors bg-surface text-on-surface border-l-2 border-primary" data-path="live-execution-ledger" href="#"><span class="font-body-md text-body-md">Active Task Ledger</span><span class="font-code-sm text-code-sm text-secondary">T-01</span></a><a class="flex items-center justify-between px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface border-l-2 border-transparent transition-colors" data-path="run-manifest-history" href="#"><span class="font-body-md text-body-md">Past Manifest Runs</span><span class="font-code-sm text-code-sm text-secondary">12</span></a><a class="flex items-center justify-between px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface border-l-2 border-transparent transition-colors" data-path="agent-orchestration-registry" href="#"><span class="font-body-md text-body-md">Fault Injection Panel</span><span class="font-code-sm text-code-sm text-secondary">OFF</span></a><a class="flex items-center justify-between px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface border-l-2 border-transparent transition-colors" data-path="telemetry-audit-log" href="#"><span class="font-body-md text-body-md">Parameter Codex</span><span class="font-code-sm text-code-sm text-secondary">RO</span></a></nav></div><div class="p-space-md border-t border-surface-container-highest bg-surface-container-low"><div class="flex items-center justify-between font-code-sm text-code-sm text-secondary mb-space-xs"><span>SUBSTRATE STATUS</span><span class="text-tertiary font-medium">SYNCHRONIZED</span></div><div class="h-1 w-full bg-surface-container-highest"><div class="h-1 bg-tertiary w-3/4"></div></div></div></aside><div class="pl-72"><main class="w-full pt-14 bg-surface min-h-screen"><div class="flex flex-col w-full">
+<!-- Operational Sub-Header Bar -->
+<div class="w-full bg-surface-container-low px-space-md py-space-xs flex flex-wrap items-center justify-between gap-space-sm border-b border-surface-container-highest">
+<div class="flex items-center gap-space-md">
+<div class="flex items-center gap-space-xs font-code-sm text-code-sm">
+<span class="text-secondary font-medium">DISPATCH:</span>
+<span class="text-on-surface font-semibold">T-0881-ERP</span>
+</div>
+<div class="h-3 w-px bg-surface-container-highest"></div>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-primary-fixed text-primary font-label-tabular text-label-tabular tracking-wider font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+        RECOVERING / RETRYING
+      </div>
+<div class="h-3 w-px bg-surface-container-highest"></div>
+<div class="font-code-sm text-code-sm text-secondary">
+        FAULT HOOK: <span class="text-error font-medium">INJECTED_504_TIMEOUT</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md">
+<div class="font-code-sm text-code-sm text-secondary flex items-center gap-1">
+<span>STRATEGY:</span>
+<span class="text-on-surface uppercase font-medium">Idempotent Inspection</span>
+</div>
+<div class="h-3 w-px bg-surface-container-highest"></div>
+<div class="flex items-center gap-1 font-label-tabular text-label-tabular text-on-surface">
+<span class="text-secondary">LATENCY:</span>
+<span>+4820ms</span>
+</div>
+</div>
+</div>
+<!-- Primary 3-Column Planar Surface -->
+<div class="w-full grid grid-cols-1 lg:grid-cols-12 min-h-[calc(100vh-5.5rem)]">
+<!-- LEFT COLUMN: Task Composer & Injected Faults (Col 3) -->
+<div class="lg:col-span-3 border-r border-surface-container-highest bg-surface flex flex-col justify-between">
+<div class="flex flex-col">
+<!-- Section Header -->
+<div class="px-space-md py-space-sm bg-surface-container border-b border-surface-container-highest flex items-center justify-between">
+<span class="font-label-tabular text-label-tabular uppercase tracking-wider text-secondary">01 // Task Specification</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">LOCKED</span>
+</div>
+<!-- Task Instruction Area -->
+<div class="p-space-md border-b border-surface-container-highest">
+<label class="block font-label-tabular text-label-tabular uppercase text-secondary mb-space-xs">Directive Statement</label>
+<div class="p-space-sm bg-surface-container-low border border-surface-container-highest font-code-sm text-code-sm text-on-surface leading-relaxed">
+            Pay the latest Acme invoice in the ERP.
+          </div>
+<div class="mt-space-xs flex items-center justify-between text-secondary font-code-sm text-code-sm">
+<span>Target Subsystem: ERP-ACME-FIN</span>
+<span>Priority: 0</span>
+</div>
+</div>
+<!-- Injected Fault Controller -->
+<div class="p-space-md border-b border-surface-container-highest bg-surface-container-low/50">
+<div class="flex items-center justify-between mb-space-xs">
+<span class="font-label-tabular text-label-tabular uppercase text-error font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">bolt</span>
+              Active Fault Injection
+            </span>
+<span class="font-label-tabular text-label-tabular px-1.5 py-0.2 bg-error-container text-error rounded-full font-bold">ARMED</span>
+</div>
+<div class="mt-space-sm bg-surface border-l-2 border-error p-space-sm">
+<div class="font-title-md text-title-md text-on-surface mb-space-xxs">ERP save times out (504) but saves</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-snug">
+              Simulates socket drop post-commit on <code class="font-code-sm text-code-sm text-primary">POST /erp/bills/save</code>. Server processes request; proxy returns HTTP 504 to client.
+            </p>
+</div>
+<div class="mt-space-sm space-y-space-xs font-body-sm text-body-sm">
+<label class="flex items-center justify-between text-secondary py-space-xxs border-b border-surface-container-highest">
+<span>Drop response payload</span>
+<span class="font-code-sm text-code-sm text-tertiary">ENABLED</span>
+</label>
+<label class="flex items-center justify-between text-secondary py-space-xxs border-b border-surface-container-highest">
+<span>Post-commit latency floor</span>
+<span class="font-code-sm text-code-sm text-on-surface">5,000ms</span>
+</label>
+<label class="flex items-center justify-between text-secondary py-space-xxs">
+<span>Auto-recovery branch mode</span>
+<span class="font-code-sm text-code-sm text-primary font-medium">RECONCILE_FIRST</span>
+</label>
+</div>
+</div>
+<!-- Plain Text Examples / References -->
+<div class="p-space-md">
+<span class="font-label-tabular text-label-tabular uppercase text-secondary block mb-space-sm">Codex Presets &amp; Manifests</span>
+<div class="space-y-space-xs font-body-sm text-body-sm">
+<a class="block text-secondary hover:text-primary transition-colors underline decoration-outline-variant underline-offset-2" href="#">
+              manifest://acme/reconcile-and-post-batch.yaml
+            </a>
+<a class="block text-secondary hover:text-primary transition-colors underline decoration-outline-variant underline-offset-2" href="#">
+              manifest://acme/verify-vendor-ein-lookup.yaml
+            </a>
+<a class="block text-secondary hover:text-primary transition-colors underline decoration-outline-variant underline-offset-2" href="#">
+              manifest://erp-core/idempotent-settlement.rego
+            </a>
+</div>
+</div>
+</div>
+<!-- Past Runs Mini Ledger -->
+<div class="border-t border-surface-container-highest p-space-md bg-surface-container-low">
+<span class="font-label-tabular text-label-tabular uppercase text-secondary block mb-space-xs">Prior Run Records</span>
+<div class="space-y-space-xxs font-code-sm text-code-sm">
+<div class="flex items-center justify-between text-on-surface py-0.5">
+<span class="text-secondary font-mono">20261003-231012</span>
+<span class="text-tertiary">SUCCESS (2m 14s)</span>
+</div>
+<div class="flex items-center justify-between text-on-surface py-0.5">
+<span class="text-secondary font-mono">20261003-214409</span>
+<span class="text-error">ABORT (504_UNHANDLED)</span>
+</div>
+<div class="flex items-center justify-between text-on-surface py-0.5">
+<span class="text-secondary font-mono">20261003-180255</span>
+<span class="text-tertiary">SUCCESS (1m 48s)</span>
+</div>
+</div>
+</div>
+</div>
+<!-- CENTER COLUMN: Transit Diagram & Branching Execution Stream (Col 5) -->
+<div class="lg:col-span-5 border-r border-surface-container-highest bg-surface flex flex-col">
+<!-- TOP: RUN MAP (Transit diagram signature graphic) -->
+<div class="p-space-md border-b border-surface-container-highest bg-surface">
+<div class="flex items-center justify-between mb-space-sm">
+<span class="font-label-tabular text-label-tabular uppercase tracking-wider text-secondary">02 // Transit Topology &amp; Branch Vector</span>
+<span class="font-code-sm text-code-sm text-primary font-medium">RECOVERY_LOOP_1</span>
+</div>
+<div class="w-full bg-surface-container-low border border-surface-container-highest p-space-md">
+<!-- Transit Map SVG Graphic -->
+<svg class="w-full h-32" fill="none" viewbox="0 0 540 120" xmlns="http://www.w3.org/2000/svg">
+<!-- Background grid reference lines -->
+<line stroke="#E4E2DD" stroke-dasharray="2 4" stroke-width="1" x1="0" x2="540" y1="60" y2="60"></line>
+<line stroke="#E4E2DD" stroke-dasharray="2 4" stroke-width="1" x1="100" x2="100" y1="10" y2="110"></line>
+<line stroke="#E4E2DD" stroke-dasharray="2 4" stroke-width="1" x1="270" x2="270" y1="10" y2="110"></line>
+<line stroke="#E4E2DD" stroke-dasharray="2 4" stroke-width="1" x1="440" x2="440" y1="10" y2="110"></line>
+<!-- Main Spine: Mail -> Acme Portal -> ERP -->
+<path d="M 100 60 L 270 60" stroke="#1B1C19" stroke-width="2.5"></path>
+<path d="M 270 60 L 370 60" stroke="#BA1A1A" stroke-width="2.5"></path>
+<!-- Red Tick Mark indicating 504 Failure -->
+<line stroke="#BA1A1A" stroke-width="3" x1="370" x2="370" y1="46" y2="74"></line>
+<text class="font-code-sm text-[10px] font-bold" fill="#BA1A1A" x="375" y="44">ERR: 504 TIMEOUT</text>
+<!-- Recovery Loop (Transit detour) -->
+<path d="M 370 60 L 385 85 L 420 85 L 440 60" stroke="#CC4900" stroke-dasharray="4 3" stroke-width="2"></path>
+<polygon fill="#CC4900" points="415,82 423,85 415,88"></polygon>
+<text class="font-code-sm text-[9px] font-medium" fill="#CC4900" x="350" y="104">RECOVERY: VERIFY_EXISTENCE</text>
+<!-- Station Nodes -->
+<!-- Station 1: Mail -->
+<circle cx="100" cy="60" fill="#FBF9F4" r="7" stroke="#1B1C19" stroke-width="3"></circle>
+<text class="font-title-md text-[12px] font-semibold" fill="#1B1C19" text-anchor="middle" x="100" y="38">Mail</text>
+<text class="font-code-sm text-[10px]" fill="#5F5E61" text-anchor="middle" x="100" y="85">INVOICE_RCVD</text>
+<!-- Station 2: Acme Portal -->
+<circle cx="270" cy="60" fill="#FBF9F4" r="7" stroke="#1B1C19" stroke-width="3"></circle>
+<text class="font-title-md text-[12px] font-semibold" fill="#1B1C19" text-anchor="middle" x="270" y="38">Acme Portal</text>
+<text class="font-code-sm text-[10px]" fill="#5F5E61" text-anchor="middle" x="270" y="85">PDF_PARSED</text>
+<!-- Station 3: ERP (Active with Orange recovery indicator) -->
+<circle cx="440" cy="60" fill="#CC4900" r="9" stroke="#FBF9F4" stroke-width="2"></circle>
+<circle cx="440" cy="60" fill="none" r="14" stroke="#CC4900" stroke-dasharray="3 3" stroke-width="1.5"></circle>
+<text class="font-title-md text-[12px] font-semibold" fill="#1B1C19" text-anchor="middle" x="440" y="38">ERP Core</text>
+<text class="font-code-sm text-[10px] font-bold" fill="#CC4900" text-anchor="middle" x="440" y="85">RETRYING_CHECK</text>
+</svg>
+</div>
+</div>
+<!-- BELOW: BRANCHING TIMELINE (Signature branching feature) -->
+<div class="p-space-md flex-1 overflow-y-auto">
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-label-tabular text-label-tabular uppercase tracking-wider text-secondary">03 // Execution Ledger &amp; Divergent Stream</span>
+<span class="font-code-sm text-code-sm text-secondary">CLOCK: 04:52.12</span>
+</div>
+<div class="relative pl-6">
+<!-- Continuous Main Spine Hairline -->
+<div class="absolute left-2.5 top-2 bottom-4 w-px bg-surface-container-highest"></div>
+<!-- Step 01 to 05 Compact Historical Nodes -->
+<div class="space-y-space-sm mb-space-sm">
+<div class="relative flex items-start gap-space-sm">
+<div class="absolute -left-6 mt-1 w-2 h-2 rounded-full bg-surface-variant border border-secondary"></div>
+<div class="w-full flex items-center justify-between border-b border-surface-container-highest pb-space-xxs">
+<span class="font-code-sm text-code-sm text-secondary"><strong class="text-on-surface">01</strong> mail_open_message "Invoice Acme Inc #1094"</span>
+<span class="font-code-sm text-code-sm text-tertiary">200 OK</span>
+</div>
+</div>
+<div class="relative flex items-start gap-space-sm">
+<div class="absolute -left-6 mt-1 w-2 h-2 rounded-full bg-surface-variant border border-secondary"></div>
+<div class="w-full flex items-center justify-between border-b border-surface-container-highest pb-space-xxs">
+<span class="font-code-sm text-code-sm text-secondary"><strong class="text-on-surface">02</strong> pdf_extract_fields "inv_1094.pdf" (Total: $4,200.00)</span>
+<span class="font-code-sm text-code-sm text-tertiary">EXTRACTED</span>
+</div>
+</div>
+<div class="relative flex items-start gap-space-sm">
+<div class="absolute -left-6 mt-1 w-2 h-2 rounded-full bg-surface-variant border border-secondary"></div>
+<div class="w-full flex items-center justify-between border-b border-surface-container-highest pb-space-xxs">
+<span class="font-code-sm text-code-sm text-secondary"><strong class="text-on-surface">03</strong> browser_navigate "http://localhost:8001/erp/login"</span>
+<span class="font-code-sm text-code-sm text-tertiary">SESSION_OPEN</span>
+</div>
+</div>
+<div class="relative flex items-start gap-space-sm">
+<div class="absolute -left-6 mt-1 w-2 h-2 rounded-full bg-surface-variant border border-secondary"></div>
+<div class="w-full flex items-center justify-between border-b border-surface-container-highest pb-space-xxs">
+<span class="font-code-sm text-code-sm text-secondary"><strong class="text-on-surface">04</strong> browser_fill_form "Vendor: Acme Inc | Total: 4200.00"</span>
+<span class="font-code-sm text-code-sm text-tertiary">DOM_MUTATED</span>
+</div>
+</div>
+<div class="relative flex items-start gap-space-sm">
+<div class="absolute -left-6 mt-1 w-2 h-2 rounded-full bg-surface-variant border border-secondary"></div>
+<div class="w-full flex items-center justify-between border-b border-surface-container-highest pb-space-xxs">
+<span class="font-code-sm text-code-sm text-secondary"><strong class="text-on-surface">05</strong> provenance_audit "Acme Corp TaxID matches Ledger"</span>
+<span class="font-code-sm text-code-sm text-tertiary">SEALED</span>
+</div>
+</div>
+<div class="relative flex items-start gap-space-sm">
+<div class="absolute -left-6 mt-1 w-2 h-2 rounded-full bg-surface-variant border border-secondary"></div>
+<div class="w-full flex items-center justify-between border-b border-surface-container-highest pb-space-xxs">
+<span class="font-code-sm text-code-sm text-secondary"><strong class="text-on-surface">06</strong> browser_submit_action "Initiating Form Save"</span>
+<span class="font-code-sm text-code-sm text-tertiary">PENDING_ACK</span>
+</div>
+</div>
+</div>
+<!-- STEP 07: THE ERROR BRANCH & DETOUR -->
+<div class="relative mb-space-md">
+<!-- Normal Step Node on Spine -->
+<div class="relative flex items-start gap-space-sm mb-space-xs">
+<div class="absolute -left-6 mt-1 w-2.5 h-2.5 rounded-full bg-error border-2 border-surface"></div>
+<div class="w-full">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-code-sm font-semibold text-error">07 browser_click 'Save Bill'</span>
+<span class="font-label-tabular text-label-tabular px-1.5 py-0.5 bg-error-container text-error font-bold">HTTP 504 GATEWAY TIMEOUT</span>
+</div>
+</div>
+</div>
+<!-- Branch Graphic & Content Container -->
+<div class="ml-2 pl-4 border-l-2 border-error py-space-xs space-y-space-sm relative">
+<!-- Visual Branch Arc -->
+<div class="absolute -left-[2px] top-0 w-3 h-3 border-t-2 border-l-2 border-error"></div>
+<!-- Error Detail Box (Paper & Ink rule style) -->
+<div class="bg-surface-container-low p-space-sm border border-outline-variant">
+<div class="flex items-center justify-between text-error font-code-sm text-code-sm font-medium mb-space-xxs">
+<span>DISPATCH_FAULT: SOCKET_TIMEOUT_AFTER_WRITE</span>
+<span class="font-label-tabular text-label-tabular">T+5.002s</span>
+</div>
+<div class="font-body-sm text-body-sm text-on-surface">
+                  The remote ERP server dropped the downstream connection during <code class="font-code-sm text-code-sm text-primary">POST /erp/bills/4/commit</code>. The write may have succeeded silently on disk.
+                </div>
+</div>
+<!-- Recovery Logic Statement -->
+<div class="bg-primary-fixed/20 p-space-sm border-l-2 border-primary">
+<div class="font-label-tabular text-label-tabular uppercase tracking-wider text-primary font-bold mb-space-xxs">
+                  Deterministic Recovery Rule Active
+                </div>
+<div class="font-body-sm text-body-sm text-on-surface leading-snug">
+                  "Recovery logic: check bill list before retrying to prevent duplicate entries." Re-POST without idempotency check would double-bill vendor.
+                </div>
+</div>
+<!-- Provenance Warning Note in Stream -->
+<div class="p-space-xs bg-surface-container-highest/60 border border-outline-variant/60 flex items-start gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary shrink-0 mt-0.5">warning</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">
+<strong class="text-on-surface">PROVENANCE NOTE:</strong> Unsourced value <code class="text-primary font-semibold">'2026-10-03'</code> not seen on any page this run. Fallback defaulted to bill date header.
+                </span>
+</div>
+<!-- Reassuring Branch Rejoinder -->
+<div class="bg-surface-container border border-surface-container-highest p-space-sm flex items-start gap-space-sm">
+<span class="material-symbols-outlined text-[18px] text-tertiary shrink-0 mt-0.5">check_circle</span>
+<div class="w-full">
+<div class="font-code-sm text-code-sm text-on-surface font-semibold">RECONCILIATION SUCCEEDED</div>
+<div class="font-body-sm text-body-sm text-secondary">
+                    Checked bill list: <strong class="text-on-surface font-mono">Bill #4</strong> exists with status <span class="font-code-sm text-code-sm px-1 py-0.2 bg-surface-container-high text-on-surface border border-surface-container-highest">DRAFT</span>. No duplicate created. Resuming execution.
+                  </div>
+</div>
+</div>
+</div>
+</div>
+<!-- STEP 08: Main Spine Resumes (Active Orange Node) -->
+<div class="relative flex items-start gap-space-sm">
+<div class="absolute -left-6 mt-1 w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
+<div class="w-full bg-surface-container-low p-space-sm border border-primary">
+<div class="flex items-center justify-between mb-space-xxs">
+<span class="font-code-sm text-code-sm font-semibold text-primary">08 browser_navigate</span>
+<span class="font-label-tabular text-label-tabular px-1.5 py-0.2 bg-primary text-on-primary uppercase font-bold tracking-wider">ACTIVE EXECUTING</span>
+</div>
+<div class="font-code-md text-code-md text-on-surface mb-space-xxs">
+                http://localhost:8001/erp/bills/4
+              </div>
+<div class="font-body-sm text-body-sm text-secondary">
+                Executing post-timeout verification check. Inspecting persistence integrity &amp; vendor reference payload.
+              </div>
+</div>
+</div>
+</div>
+</div>
+<!-- Action Strip at Base of Center Column -->
+<div class="p-space-sm border-t border-surface-container-highest bg-surface-container-low flex items-center justify-between">
+<div class="flex items-center gap-space-xs font-code-sm text-code-sm text-secondary">
+<span class="w-2 h-2 rounded-full bg-tertiary"></span>
+<span>RECONCILIATION ENGINE: READY</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="px-space-sm py-1 bg-surface border border-surface-container-highest hover:bg-surface-container font-body-sm text-body-sm text-on-surface transition-colors">
+            Force Re-POST
+          </button>
+<button class="px-space-sm py-1 bg-primary text-on-primary hover:bg-primary-container font-body-sm text-body-sm font-medium transition-colors">
+            Approve Auto-Heal
+          </button>
+</div>
+</div>
+</div>
+<!-- RIGHT COLUMN: Simulated ERP & Telemetry Inspector (Col 4) -->
+<div class="lg:col-span-4 bg-surface flex flex-col justify-between">
+<div class="flex flex-col">
+<!-- Section Header -->
+<div class="px-space-md py-space-sm bg-surface-container border-b border-surface-container-highest flex items-center justify-between">
+<span class="font-label-tabular text-label-tabular uppercase tracking-wider text-secondary">04 // Viewport Inspection &amp; Memory</span>
+<span class="font-code-sm text-code-sm text-primary font-medium">LIVE_HEADLESS_VIEW</span>
+</div>
+<!-- Headless Browser Simulated Frame -->
+<div class="p-space-md border-b border-surface-container-highest">
+<div class="border border-surface-container-highest bg-surface-container-lowest">
+<!-- Browser Chrome URL bar -->
+<div class="px-space-sm py-1.5 bg-surface-container border-b border-surface-container-highest flex items-center gap-space-xs">
+<span class="w-2 h-2 rounded-full bg-error"></span>
+<span class="w-2 h-2 rounded-full bg-secondary-fixed"></span>
+<span class="w-2 h-2 rounded-full bg-tertiary"></span>
+<div class="flex-1 ml-1 px-2 py-0.5 bg-surface border border-surface-container-highest font-code-sm text-code-sm text-on-surface truncate">
+                localhost:8001/erp/bills
+              </div>
+<span class="material-symbols-outlined text-[14px] text-secondary">refresh</span>
+</div>
+<!-- Simulated ERP Screen Content -->
+<div class="p-space-sm font-body-sm text-body-sm">
+<div class="flex items-center justify-between border-b border-surface-container-highest pb-space-xs mb-space-xs">
+<div>
+<span class="font-title-md text-title-md text-on-surface font-semibold block">Acme Ledger ERP v4.1</span>
+<span class="font-code-sm text-code-sm text-secondary">Module: AP / Open Bills</span>
+</div>
+<span class="font-label-tabular text-label-tabular px-1.5 py-0.5 bg-surface-container-high border border-outline-variant/40 text-on-surface">
+                  PORT: 8001
+                </span>
+</div>
+<!-- Bill reconciliation table preview -->
+<table class="w-full text-left font-code-sm text-code-sm border-collapse mb-space-sm">
+<thead>
+<tr class="border-b border-surface-container-highest text-secondary font-label-tabular text-label-tabular">
+<th class="py-1">ID</th>
+<th class="py-1">VENDOR</th>
+<th class="py-1 text-right">TOTAL</th>
+<th class="py-1 text-right">STATUS</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container-highest text-on-surface">
+<tr class="bg-primary-fixed/20 border-l-2 border-primary">
+<td class="py-1.5 font-bold pl-1">#4</td>
+<td class="py-1.5">Acme Inc</td>
+<td class="py-1.5 text-right font-mono">$4,200.00</td>
+<td class="py-1.5 text-right font-bold text-primary">DRAFT</td>
+</tr>
+<tr class="opacity-60">
+<td class="py-1.5 pl-1">#3</td>
+<td class="py-1.5">Global Freight</td>
+<td class="py-1.5 text-right font-mono">$840.50</td>
+<td class="py-1.5 text-right text-tertiary">PAID</td>
+</tr>
+<tr class="opacity-60">
+<td class="py-1.5 pl-1">#2</td>
+<td class="py-1.5">Apex Hosting</td>
+<td class="py-1.5 text-right font-mono">$1,120.00</td>
+<td class="py-1.5 text-right text-tertiary">PAID</td>
+</tr>
+</tbody>
+</table>
+<!-- Recovery Proof Banner -->
+<div class="p-space-xs bg-surface-container-low border border-surface-container-highest flex items-center justify-between text-secondary font-code-sm text-code-sm">
+<span>Record #4 Written at 04:51:59</span>
+<span class="text-tertiary font-semibold">COMMIT VERIFIED</span>
+</div>
+</div>
+</div>
+</div>
+<!-- WORKING MEMORY LIST WITH SOURCE TAGS -->
+<div class="p-space-md border-b border-surface-container-highest">
+<div class="flex items-center justify-between mb-space-xs">
+<span class="font-label-tabular text-label-tabular uppercase tracking-wider text-secondary">Working Memory Key-Values</span>
+<span class="font-code-sm text-code-sm text-secondary">REGISTRY: 4 SLOTS</span>
+</div>
+<div class="space-y-space-xs font-code-sm text-code-sm">
+<!-- Key Value 1 -->
+<div class="p-space-xs bg-surface-container-low border border-surface-container-highest flex items-center justify-between">
+<div>
+<span class="text-secondary">vendor_name</span> = <span class="text-on-surface font-semibold">"Acme Inc"</span>
+</div>
+<span class="font-label-tabular text-label-tabular px-1 bg-surface text-secondary border border-surface-container-highest">
+                SRC: pdf_extract
+              </span>
+</div>
+<!-- Key Value 2 -->
+<div class="p-space-xs bg-surface-container-low border border-surface-container-highest flex items-center justify-between">
+<div>
+<span class="text-secondary">invoice_total</span> = <span class="text-on-surface font-mono font-semibold">4200.00</span>
+</div>
+<span class="font-label-tabular text-label-tabular px-1 bg-surface text-secondary border border-surface-container-highest">
+                SRC: pdf_extract
+              </span>
+</div>
+<!-- Key Value 3 (Warning Provenance) -->
+<div class="p-space-xs bg-surface-container-low border-l-2 border-primary border-t border-r border-b border-surface-container-highest flex items-center justify-between">
+<div>
+<span class="text-secondary">invoice_date</span> = <span class="text-primary font-mono font-semibold">"2026-10-03"</span>
+</div>
+<span class="font-label-tabular text-label-tabular px-1 bg-primary-fixed text-primary font-bold">
+                SRC: UNVERIFIED_FALLBACK
+              </span>
+</div>
+<!-- Key Value 4 -->
+<div class="p-space-xs bg-surface-container-low border border-surface-container-highest flex items-center justify-between">
+<div>
+<span class="text-secondary">discovered_bill_id</span> = <span class="text-tertiary font-mono font-bold">4</span>
+</div>
+<span class="font-label-tabular text-label-tabular px-1 bg-surface text-tertiary border border-surface-container-highest">
+                SRC: list_reconcile
+              </span>
+</div>
+</div>
+</div>
+<!-- SUCCESS CRITERIA CHECKLIST -->
+<div class="p-space-md">
+<span class="font-label-tabular text-label-tabular uppercase tracking-wider text-secondary block mb-space-sm">Invariant Criteria Audit</span>
+<div class="space-y-space-xs font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest">
+<span class="text-on-surface">Target invoice identified from mail payload</span>
+<span class="font-code-sm text-code-sm text-tertiary font-medium">SATISFIED</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest">
+<span class="text-on-surface">No duplicate bill posted upon server timeout</span>
+<span class="font-code-sm text-code-sm text-tertiary font-medium">PREVENTED</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest">
+<span class="text-on-surface">Bill record #4 transitioned from DRAFT to APPROVED</span>
+<span class="font-code-sm text-code-sm text-primary font-medium">IN_PROGRESS</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface">Payment receipt exported to dispatch ledger</span>
+<span class="font-code-sm text-code-sm text-secondary">AWAITING_STEP_09</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Inspector Footer Diagnostics -->
+<div class="p-space-md border-t border-surface-container-highest bg-surface-container-low font-code-sm text-code-sm">
+<div class="flex items-center justify-between text-secondary mb-1">
+<span>SOCKET POOL: 1/8</span>
+<span>HEAP: 114MB</span>
+<span>RETRY COUNTER: 1/3</span>
+</div>
+<div class="w-full bg-surface-container-highest h-1">
+<div class="bg-primary h-1 w-1/3"></div>
+</div>
+</div>
+</div>
+</div>
+</div></main></div></body></html>

@@ -21,6 +21,7 @@ from playwright.sync_api import Error as PWError
 
 from .netpolicy import AllowList, is_high_risk, normalize, request_key
 from .vault import SiteCredential
+from .world import RiskRules, default_world
 
 log = logging.getLogger("autowork.browser")
 
@@ -81,7 +82,10 @@ class Snapshot:
     def element(self, eid: int) -> dict | None:
         return next((e for e in self.elements if e["id"] == eid), None)
 
-    def render(self, text_chars: int = 1800) -> str:
+    def render(self, text_chars: int = 1800, text_chars_with_elements: int = 1200) -> str:
+        """The observation. Page text lines that only repeat a listed element (nav links, form labels, button
+        texts) are left out, and the excerpt is shorter when there is an element list: measured on a replayed
+        trajectory, the page text was otherwise largely a second copy of the elements. browser_read has it all."""
         lines = [f"URL: {self.url}", f"TITLE: {self.title}"]
         if self.status and self.status >= 400:
             lines.append(f"HTTP STATUS: {self.status}  <-- the last request FAILED")
@@ -92,10 +96,16 @@ class Snapshot:
             lines.append("  " + describe(e))
         if len(self.elements) > 70:
             lines.append(f"  ... {len(self.elements) - 70} more elements (use browser_read)")
-        body = self.text.strip()
-        more = f"\n  ... [{len(body) - text_chars} more chars, use browser_read]" if len(body) > text_chars else ""
-        lines.append("PAGE TEXT:\n" + body[:text_chars] + more)
+        listed = {_norm(e.get("text") or e.get("label") or "") for e in self.elements[:70]} - {""}
+        body = "\n".join(ln for ln in self.text.strip().splitlines() if _norm(ln) not in listed).strip()
+        cap = min(text_chars, text_chars_with_elements) if self.elements else text_chars
+        more = f"\n  ... [{len(body) - cap} more chars, use browser_read]" if len(body) > cap else ""
+        lines.append("PAGE TEXT:\n" + body[:cap] + more)
         return f"URL: {self.url}\n" + wrap_untrusted("WEB_PAGE", "\n".join(lines[1:]))
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.split()).lower()
 
 
 def describe(e: dict) -> str:
@@ -133,7 +143,9 @@ def wrap_untrusted(kind: str, text: str) -> str:
 @dataclass
 class BrowserSession:
     shots_dir: Path
-    allowlist: AllowList = field(default_factory=AllowList)
+    allowlist: AllowList = field(default_factory=lambda: default_world().allowlist())
+    risk: RiskRules = field(default_factory=lambda: default_world().risk)
+    base_url: str = field(default_factory=lambda: default_world().start_url)  # resolves relative URLs in goto
     headless: bool = True
     read_only: bool = False
     login_paths: frozenset[str] = frozenset()  # read-only mode: exact paths that may receive a POST
@@ -172,7 +184,9 @@ class BrowserSession:
             self._blocked.append(f"{req.method} {req.url[:120]} blocked: {reason}")
             route.abort("blockedbyclient")
             return
-        if self.gate_high_risk and is_high_risk(req.method, req.url, _post_data(req)):
+        if self.gate_high_risk and is_high_risk(
+            req.method, req.url, _post_data(req), self.risk.path, self.risk.form_field
+        ):
             key = request_key(req.method, req.url)
             if self._preapproved in (key, "*"):
                 self._preapproved = None  # single use
@@ -271,7 +285,7 @@ class BrowserSession:
     # ------------------------------------------------------------------ actions
     def goto(self, url: str) -> Snapshot:
         if url.startswith("/"):
-            url = "http://localhost:8001" + url
+            url = urljoin(self.base_url, url)
         reason = self.allowlist.check(url)
         if reason:  # early, clearer error; the route guard is the real enforcement
             raise BrowserError(f"URL not allowed: {reason}")

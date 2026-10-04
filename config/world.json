@@ -1,0 +1,75 @@
+{
+  "_comment": "The environment the agent works in. Agent code holds no app-specific URLs or risk vocabulary: they live here. See agent/world.py.",
+  "start_url": "http://localhost:8001/",
+  "description": "Company intranet start page: {start_url}  (links to webmail, the internal ERP and the IT helpdesk)",
+  "allowed_origins": [
+    "http://localhost:8001"
+  ],
+  "blocked_path_prefixes": [
+    "/admin"
+  ],
+  "apps": {
+    "_comment": "Where each application lives (URL path prefix) and what it holds. The auditor uses this to decide which app the authoritative source of a task's values is in, from the task text alone; a source page must be in one of those apps. 'workspace' (shared files) is always available.",
+    "mail": {
+      "path": "/mail",
+      "about": "corporate webmail of the AP mailbox: vendor invoices, requests, notices"
+    },
+    "acme": {
+      "path": "/acme",
+      "about": "Acme Supplies' vendor portal: Acme's invoices"
+    },
+    "erp": {
+      "path": "/erp",
+      "about": "the internal ERP: bills (invoices entered), vendors, payments"
+    },
+    "helpdesk": {
+      "path": "/helpdesk",
+      "about": "the IT helpdesk: tickets, comments, employee directory"
+    }
+  },
+  "high_risk": {
+    "_comment": "Approval required in balanced/supervised mode. button_words: whole words in a button's label. path_segments: a non-GET request whose path has this segment. path_substrings / field_substrings: anywhere in the path / in a submitted form field's name.",
+    "button_words": [
+      "pay",
+      "paid",
+      "payment",
+      "delete",
+      "remove",
+      "wire",
+      "transfer",
+      "refund",
+      "approve",
+      "cancel",
+      "terminate",
+      "reset password",
+      "grant admin"
+    ],
+    "path_segments": [
+      "pay",
+      "payment",
+      "payments",
+      "delete",
+      "remove",
+      "transfer",
+      "wire",
+      "refund",
+      "approve",
+      "cancel",
+      "reset-password",
+      "grant-admin"
+    ],
+    "path_substrings": [
+      "bank",
+      "iban",
+      "payout"
+    ],
+    "field_substrings": [
+      "bank",
+      "iban",
+      "swift",
+      "routing",
+      "account_number",
+      "payout"
+    ]
+  }
+}

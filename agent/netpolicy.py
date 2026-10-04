@@ -19,13 +19,6 @@ from urllib.parse import unquote, urlsplit
 DEFAULT_PORTS = {"http": 80, "https": 443}
 LOOPBACK_ALIASES = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
-# Paths whose non-GET requests move money, destroy data or change payment details.
-HIGH_RISK_PATH = re.compile(
-    r"/(pay|payment|payments|delete|remove|transfer|wire|refund|approve|cancel)(/|$)"
-    r"|bank|iban|payout",
-    re.I,
-)
-
 
 @dataclass(frozen=True)
 class NormalizedURL:
@@ -66,8 +59,8 @@ def normalize(url: str) -> NormalizedURL | None:
 
 @dataclass(frozen=True)
 class AllowList:
-    origins: frozenset[tuple[str, str, int]] = frozenset({("http", "localhost", 8001)})
-    blocked_prefixes: tuple[str, ...] = ("/admin",)
+    origins: frozenset[tuple[str, str, int]]  # from the world config (agent/world.py)
+    blocked_prefixes: tuple[str, ...] = ()
 
     def check(self, url: str) -> str | None:
         """Returns a human-readable reason if the URL is NOT allowed, else None."""
@@ -83,18 +76,18 @@ class AllowList:
         return None
 
 
-HIGH_RISK_FIELD = re.compile(r"(^|&)[^=&]*(bank|iban|swift|routing|account_number|payout)[^=&]*=", re.I)
-
-
-def is_high_risk(method: str, url: str, body: str | None = None) -> bool:
-    """Non-GET requests to payment / deletion endpoints, or that submit bank-detail fields.
-    Independent of how the request was triggered (button, Enter key, page JavaScript)."""
+def is_high_risk(
+    method: str, url: str, body: str | None, path_rule: re.Pattern[str], field_rule: re.Pattern[str]
+) -> bool:
+    """Non-GET requests to a high-risk path (e.g. payment / deletion endpoints), or that submit a high-risk form field
+    (e.g. bank details). The rules come from the world config. Independent of how the request was triggered (button,
+    Enter key, page JavaScript)."""
     if method.upper() in ("GET", "HEAD", "OPTIONS"):
         return False
     n = normalize(url)
-    if n is None or HIGH_RISK_PATH.search(n.path):
+    if n is None or path_rule.search(n.path):
         return True
-    return bool(body and HIGH_RISK_FIELD.search(unquote(body)))
+    return bool(body and field_rule.search(unquote(body)))
 
 
 def request_key(method: str, url: str) -> str:

@@ -82,3 +82,11 @@ class WebHuman:
     def pending(self) -> list[str]:
         with self._lock:
             return list(self._pending)
+
+    def cancel_all(self, reason: str) -> None:
+        """Answer every open question at once (the user pressed Stop): approvals are declined."""
+        with self._lock:
+            open_ = [(qid, p) for qid, p in self._pending.items() if p["answer"] is None]
+            for _, p in open_:
+                p["answer"] = {"approved": False, "comment": reason, "answer": reason}
+                p["event"].set()

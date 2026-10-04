@@ -63,6 +63,12 @@ class ProviderUnavailable(LLMError):
     """The provider kept failing (5xx, timeouts, connection errors) through every retry."""
 
 
+def make_verifier_llm(settings: Settings) -> LLMClient | None:
+    """The auditor's own client when AUTOWORK_VERIFIER_MODEL names a different model, else None (share the worker's)."""
+    vs = settings.verifier_settings()
+    return LLMClient(vs) if vs else None
+
+
 class LLMClient:
     def __init__(
         self,
@@ -89,7 +95,7 @@ class LLMClient:
         # Every model this client has used, in order, with the calls it answered (0 = switched away at once).
         # The report needs it: after a fallback, the starting model is not the one that did the work.
         self.calls_by_model: dict[str, int] = {}
-        self._use(s.llm_model, client)
+        self._use(s.llm_model, client, s.llm_key_label)
         self._sleep = sleep
         self.on_retry: Callable[[str], None] | None = None
         # cached_tokens: the part of prompt_tokens served from the provider's prompt cache. On Groq it doesn't
@@ -106,7 +112,8 @@ class LLMClient:
         # max_retries=0: retries are handled below, with provider-specific logic the SDK doesn't know
         return openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=timeout)
 
-    def _use(self, model: str, client: openai.OpenAI) -> None:
+    def _use(self, model: str, client: openai.OpenAI, key_label: str = "") -> None:
+        self.key_label = key_label  # which key answers now, for the quota ledger (agent/quota.py)
         self.model = model  # as configured, e.g. "gemini:gemini-3.8-flash": used in reports
         self.api_model = api_model_of(model)  # as the provider expects it
         self.client = client
@@ -144,7 +151,7 @@ class LLMClient:
                     raise
                 fb, client = self._fallbacks.pop(0)
                 self._retry(f"{self.model} unavailable ({str(e)[:150]}); switching to fallback model {fb.model}")
-                self._use(fb.model, client)
+                self._use(fb.model, client, fb.key_label)
 
     def _chat_once(
         self,
@@ -207,6 +214,7 @@ class LLMClient:
                         role=role,
                         step=step,
                         model=self.model,
+                        key=self.key_label,
                         base_url=str(getattr(self.client, "base_url", "")),
                         messages=msgs,
                         tools=tools,
@@ -240,6 +248,7 @@ class LLMClient:
                         role=role,
                         step=step,
                         model=self.model,
+                        key=self.key_label,
                         base_url=str(getattr(self.client, "base_url", "")),
                         messages=msgs,
                         tools=tools,
@@ -274,6 +283,7 @@ class LLMClient:
                         role=role,
                         step=step,
                         model=self.model,
+                        key=self.key_label,
                         base_url=str(getattr(self.client, "base_url", "")),
                         messages=msgs,
                         tools=tools,
@@ -338,6 +348,7 @@ class LLMClient:
                     role=role,
                     step=step,
                     model=self.model,
+                    key=self.key_label,
                     base_url=str(getattr(self.client, "base_url", "")),
                     messages=msgs,
                     tools=tools,

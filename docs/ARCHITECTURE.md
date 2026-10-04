@@ -16,12 +16,13 @@ flowchart LR
     subgraph AG["Agent process (agent/)"]
         CORE["core.py<br/>plan → loop → verify → learn"]
         CTX["context.py<br/>prompt + compression"]
-        STUCK["stuck.py<br/>repetition / error streak"]
+        STUCK["stuck.py<br/>repetition / error streak / no progress"]
         POL["policy.py<br/>label gate"]
         TOOLS["tools.py<br/>browser · files · memory · login"]
         BR["browser.py<br/>Playwright + route guard"]
         NET["netpolicy.py<br/>allowlist · high-risk requests"]
-        VER["verifier.py<br/>read-only auditor"]
+        VER["verifier.py<br/>read-only auditor<br/>own checklist + enforce()"]
+        QUOTA["quota.py<br/>budget-mode ledger"]
         VAULT["vault.py<br/>credentials + Redactor"]
         MEM["memory.py<br/>working memory · playbook"]
     end
@@ -32,6 +33,7 @@ flowchart LR
         MAIL["Webmail"]
         ACME["Acme vendor portal"]
         ERP["OurCo ERP"]
+        HELP["IT helpdesk"]
         ADMIN["/admin/* (admin token)"]
         DB[("SQLite")]
     end
@@ -49,10 +51,11 @@ flowchart LR
     TOOLS --> VAULT
     CORE --> MEM
     CORE --> VER --> BR
-    BR -- "every request checked" --> MAIL & ACME & ERP
-    MAIL & ACME & ERP --> DB
+    BR -- "every request checked" --> MAIL & ACME & ERP & HELP
+    MAIL & ACME & ERP & HELP --> DB
+    API --> QUOTA
     ADMIN --> DB
-    EVAL["evals/run_evals.py"] -- "X-Admin-Token" --> ADMIN
+    EVAL["evals/run_evals.py<br/>replay.py · reverify.py"] -- "X-Admin-Token<br/>reset · state · snapshot" --> ADMIN
 ```
 
 ## One step of the worker loop
@@ -94,11 +97,12 @@ sequenceDiagram
 
 ## Run lifecycle
 
-1. **Plan.** One JSON call returns the goal, success criteria, a plan and any blocking questions. The blocking questions are asked before any action.
-2. **Execute.** The loop above runs until `finish` is called or a budget runs out.
-3. **Verify.** If the status is `done`, the auditor (fresh context, same cookies, read-only page) checks each success criterion and returns a verdict. A failed verdict is fed back to the worker, for at most 2 rounds; an inconclusive one yields `unverified`.
+0. **Budget check** (only with a run cap on a Groq model): a run starts on a key whose local-ledger estimate of today's quota covers the cap, or is refused with the time it will (`agent/quota.py`).
+1. **Plan.** One JSON call returns the goal, success criteria, a plan and any blocking questions. It must have a goal and at least one criterion: one retry with the validation error (without JSON mode), else the run stops as `plan_failed` before acting. Blocking questions are asked before any action.
+2. **Execute.** The loop above runs until `finish` is called, a budget runs out, or 8 steps in a row bring nothing new (no new URL, memory fact, state change or observed information): `no_progress`.
+3. **Verify.** If the status is `done`, the claim is saved (`claim.json`) and the auditor (fresh context, same cookies, read-only page) first derives its own checklist from the task text alone: the fields the task implies, which of them are directory references (a vendor), and which apps hold the true values. It finds and opens the source itself, compares, and calls `verdict`. Code (`enforce`) then accepts a pass only with a source it opened, in one of those apps, that is not the record; every item checked; every field compared with values that match and appear on the source under a fitting label; and every reference matched by ID in the directory. A failed verdict is fed back to the worker, for at most 2 rounds; an inconclusive one yields `unverified`.
 4. **Learn.** For verified runs only, a distiller writes up to 5 general notes to `data/playbook.json`. They are injected into future prompts as hints that may be outdated.
-5. **Report.** `runs/<id>/report.json` and `events.jsonl` (schema v1, redacted), plus a screenshot per step.
+5. **Report.** `runs/<id>/report.json` (including the auditor's model) and `events.jsonl` (schema v1, redacted, with each tool call's full arguments), plus a screenshot per step. The eval harness and the UI also save the world's database (`world.db`), so `evals/reverify.py` can re-run only the auditor later, and `evals/replay.py` can replay the worker's actions with no LLM.
 
 ## Data flow and trust boundaries
 
@@ -111,7 +115,7 @@ sequenceDiagram
 | Agent → LLM provider | Prompts | Leaves the machine | Page and task content; vault secrets are redacted (tested). A secret that appears on a page and is not in the vault would be sent |
 | Other local websites → control plane | HTTP | **Untrusted** | Host check, token, Origin check, no CORS |
 | Eval harness → `/admin` | Reset, faults, ground truth | Trusted test code | Admin token |
-| Worker → verifier | The claim, success criteria and recorded facts | The verifier treats them as claims to check | Fresh context; read-only network layer |
+| Worker → verifier | The claim (summary, evidence), the planner's criteria, and where the worker's form submissions landed | Claims to check; the record locations only help find the record. Not the pages the worker read or the facts it remembered: they made the auditor share the worker's blind spots | Fresh context; own checklist from the task text; read-only network layer; acceptance rules in code |
 
 ## Why the verifier shares cookies
 

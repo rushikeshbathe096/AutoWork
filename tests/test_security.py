@@ -16,12 +16,20 @@ from agent.browser import BrowserSession
 from agent.core import Agent
 from agent.human import ScriptedHuman, WebHuman
 from agent.memory import Playbook
-from agent.netpolicy import AllowList, is_high_risk, normalize
+from agent.netpolicy import is_high_risk, normalize
 from agent.tools import ToolBox, WorkspaceError, confine
 from agent.vault import Vault
+from agent.world import default_world
 from conftest import PLAN, FakeLLM, W, admin_post, admin_state, make_agent
 
 VAULT = Vault.load()
+WORLD = default_world()  # config/world.json: these tests prove the checked-in config keeps the old behaviour
+
+
+def risky(method: str, url: str, body: str | None = None) -> bool:
+    return is_high_risk(method, url, body, WORLD.risk.path, WORLD.risk.form_field)
+
+
 SECRETS = VAULT.secret_values()
 
 
@@ -48,7 +56,7 @@ SECRETS = VAULT.secret_values()
     ],
 )
 def test_allowlist_blocks_bypass_attempts(url):
-    assert AllowList().check(url) is not None, url
+    assert WORLD.allowlist().check(url) is not None, url
 
 
 @pytest.mark.parametrize(
@@ -60,7 +68,7 @@ def test_allowlist_blocks_bypass_attempts(url):
     ],
 )
 def test_allowlist_allows_legitimate(url):
-    assert AllowList().check(url) is None
+    assert WORLD.allowlist().check(url) is None
 
 
 def test_normalize_collapses_aliases():
@@ -151,12 +159,12 @@ def test_network_gate_approved_request_is_sent_once(tmp_path, ws, monkeypatch):
 
 
 def test_high_risk_classification():
-    assert is_high_risk("POST", W + "/erp/bills/2/pay")
-    assert is_high_risk("POST", W + "/erp/bills/2/%70ay")
-    assert is_high_risk("POST", W + "/erp/vendors/1/edit", "email=a%40b.c&bank_iban=XX00")
-    assert not is_high_risk("POST", W + "/erp/bills/new", "vendor_id=1&invoice_number=PAY-1")
-    assert not is_high_risk("GET", W + "/erp/bills/2/pay")
-    assert not is_high_risk("POST", W + "/erp/login")
+    assert risky("POST", W + "/erp/bills/2/pay")
+    assert risky("POST", W + "/erp/bills/2/%70ay")
+    assert risky("POST", W + "/erp/vendors/1/edit", "email=a%40b.c&bank_iban=XX00")
+    assert not risky("POST", W + "/erp/bills/new", "vendor_id=1&invoice_number=PAY-1")
+    assert not risky("GET", W + "/erp/bills/2/pay")
+    assert not risky("POST", W + "/erp/login")
 
 
 # ----------------------------------------------------------------- 1.2 approval integrity
